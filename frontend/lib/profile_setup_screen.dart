@@ -56,39 +56,101 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   void _validateNick(String v) {
     setState(() {
       final reg = RegExp(r'^[a-zA-Z0-9_.]+$');
-      if (v.isEmpty) { _nickMsg = "3–20 characters, letters, numbers, . or _ only"; _nickColor = const Color(0xFF6F6F80); _nickValid = false; }
-      else if (!reg.hasMatch(v) || v.length < 3 || v.length > 20) { _nickMsg = "Invalid format or length"; _nickColor = const Color(0xFFFF3B5C); _nickValid = false; }
-      else { _nickMsg = "Nickname is available"; _nickColor = const Color(0xFF00F5A0); _nickValid = true; }
+      if (v.isEmpty) {
+        _nickMsg = "3–20 characters, letters, numbers, . or _ only";
+        _nickColor = const Color(0xFF6F6F80);
+        _nickValid = false;
+      } else if (v.length < 3 || v.length > 20) {
+        _nickMsg = "Nickname must be 3–20 characters";
+        _nickColor = const Color(0xFFFF3B5C);
+        _nickValid = false;
+      } else if (!reg.hasMatch(v)) {
+        _nickMsg = "Only letters, numbers, . or _ allowed";
+        _nickColor = const Color(0xFFFF3B5C);
+        _nickValid = false;
+      } else {
+        _nickMsg = "Nickname is available";
+        _nickColor = const Color(0xFF00F5A0);
+        _nickValid = true;
+      }
     });
   }
 
   void _validateEmail(String v) {
     setState(() {
       final reg = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
-      if (v.isEmpty || !reg.hasMatch(v) || v.length < 5) { _emailMsg = "Please enter a valid email address"; _emailColor = const Color(0xFFFF3B5C); _emailValid = false; }
-      else { _emailMsg = "Email looks good"; _emailColor = const Color(0xFF00F5A0); _emailValid = true; }
+      if (v.isEmpty) {
+        _emailMsg = "Enter a valid email (e.g. user@example.com)";
+        _emailColor = const Color(0xFF6F6F80);
+        _emailValid = false;
+      } else if (!reg.hasMatch(v)) {
+        _emailMsg = "Invalid email format";
+        _emailColor = const Color(0xFFFF3B5C);
+        _emailValid = false;
+      } else {
+        _emailMsg = "Email looks good";
+        _emailColor = const Color(0xFF00F5A0);
+        _emailValid = true;
+      }
     });
   }
 
   void _validatePass(String v) {
     setState(() {
-      if (v.isEmpty || v.contains(' ') || v.length < 6 || v.length > 20) { _passMsg = "Password must be 6–20 characters"; _passColor = const Color(0xFFFF3B5C); _passValid = false; }
-      else { _passMsg = "Password looks good"; _passColor = const Color(0xFF00F5A0); _passValid = true; }
+      if (v.isEmpty) {
+        _passMsg = "6–30 characters, no spaces";
+        _passColor = const Color(0xFF6F6F80);
+        _passValid = false;
+      } else if (v.contains(' ')) {
+        _passMsg = "Spaces are not allowed";
+        _passColor = const Color(0xFFFF3B5C);
+        _passValid = false;
+      } else if (v.length < 6 || v.length > 30) {
+        _passMsg = "Password must be 6–30 characters";
+        _passColor = const Color(0xFFFF3B5C);
+        _passValid = false;
+      } else {
+        _passMsg = "Password looks good";
+        _passColor = const Color(0xFF00F5A0);
+        _passValid = true;
+      }
     });
   }
 
   void _validatePlatform(String p, String v) {
     setState(() {
       bool isValid = false;
-      if (v.isEmpty) { _pMsgs[p] = _getInitialHint(p); _pColors[p] = const Color(0xFF6F6F80); }
-      else {
-        if (p == 'Discord') isValid = RegExp(r'^.{2,32}#[0-9]{4}$').hasMatch(v);
-        else if (p == 'Guilded') isValid = RegExp(r'^.{3,32}#[0-9]{3}$').hasMatch(v);
-        else if (p == 'Steam chat') isValid = RegExp(r'^[0-9]{17}$').hasMatch(v) || RegExp(r'^[a-zA-Z0-9_.]{3,32}$').hasMatch(v);
-        else isValid = RegExp(r'^[a-zA-Z0-9_.]{3,20}$').hasMatch(v);
-        _pMsgs[p] = isValid ? "$p looks good" : "Invalid format";
-        _pColors[p] = isValid ? const Color(0xFF00F5A0) : const Color(0xFFFF3B5C);
+      String error = "";
+
+      if (v.isEmpty) {
+        _pMsgs[p] = _getInitialHint(p);
+        _pColors[p] = const Color(0xFF6F6F80);
+        _pValid[p] = false;
+        return;
       }
+
+      if (p == 'Discord') {
+        isValid = RegExp(r'^.{2,32}#[0-9]{4}$').hasMatch(v);
+        error = "Format: Name#1234 (4 digits)";
+      } else if (p == 'Guilded') {
+        isValid = RegExp(r'^.{3,32}#[0-9]{3}$').hasMatch(v);
+        error = "Format: Name#123 (3 digits)";
+      } else if (p == 'Steam chat') {
+        if (RegExp(r'^[0-9]+$').hasMatch(v)) {
+          isValid = v.length == 17;
+          error = "SteamID64 must be 17 digits";
+        } else {
+          isValid = v.length >= 3 && v.length <= 32;
+          error = "Username must be 3–32 characters";
+        }
+      } else {
+        isValid = RegExp(r'^[a-zA-Z0-9_.]{3,20}$').hasMatch(v);
+        if (v.contains(' ')) error = "Spaces not allowed";
+        else error = "3–20 chars, letters, numbers, . or _";
+      }
+
+      _pMsgs[p] = isValid ? "$p looks good" : error;
+      _pColors[p] = isValid ? const Color(0xFF00F5A0) : const Color(0xFFFF3B5C);
       _pValid[p] = isValid;
     });
   }
@@ -110,15 +172,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       const SizedBox(height: 40),
                       const Text('Profile Setup', style: TextStyle(fontFamily: 'Poppins', fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
                       const SizedBox(height: 30),
-
                       _buildAvatarBlock(),
-
                       const SizedBox(height: 40),
-                      _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 125),
+                      _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 145),
                       const SizedBox(height: 10),
-                      _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 132),
+                      _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 145),
                       const SizedBox(height: 10),
-                      _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 128, isPass: true),
+                      _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 145, isPass: true),
                       const SizedBox(height: 30),
                       const Text('Connected Platforms (optional)', style: TextStyle(fontFamily: 'Poppins', fontSize: 16, color: Colors.white)),
                       const SizedBox(height: 15),
@@ -144,11 +204,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           child: const Center(child: Icon(Icons.camera, size: 50, color: Color(0xFF00F5A0))),
         ),
         const SizedBox(height: 15),
-        // Використовуємо Stack, щоб текст був ЧІТКО по центру іконки
         Stack(
           alignment: Alignment.topCenter,
           children: [
-            // Текст суворо по центру
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -157,7 +215,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 const Text('Upload Avatar', style: TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins', decoration: TextDecoration.underline)),
               ],
             ),
-            // Game Buddy праворуч
             Align(
               alignment: Alignment.centerRight,
               child: Column(
@@ -177,7 +234,32 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildMainField(TextEditingController ctrl, String h, String id, String m, Color c, bool v, Function(String) onCh, double w, {bool isPass = false}) {
     bool active = _activeField == id;
     return Column(children: [
-      Container(height: 48, alignment: Alignment.center, decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)), child: TextField(controller: ctrl, onChanged: onCh, onTap: () => setState(() => _activeField = id), obscureText: isPass ? _obscurePassword : false, textAlignVertical: TextAlignVertical.center, style: const TextStyle(color: Colors.white, fontSize: 14), decoration: InputDecoration(hintText: h, hintStyle: const TextStyle(color: Color(0xFF6F6F80)), contentPadding: const EdgeInsets.symmetric(horizontal: 20), isCollapsed: true, border: InputBorder.none, suffixIcon: isPass ? IconButton(icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: _obscurePassword ? const Color(0xFF6F6F80) : const Color(0xFF00F5A0), size: 20), onPressed: () => setState(() => _obscurePassword = !_obscurePassword)) : null))),
+      Container(
+        height: 48,
+        alignment: Alignment.center, // Додано для центрування вмісту в контейнері
+        decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)),
+        child: TextField(
+          controller: ctrl,
+          onChanged: onCh,
+          onTap: () { setState(() => _activeField = id); onCh(ctrl.text); },
+          obscureText: isPass ? _obscurePassword : false,
+          textAlignVertical: TextAlignVertical.center, // Суворе центрування
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: h,
+            hintStyle: const TextStyle(color: Color(0xFF6F6F80)),
+            contentPadding: const EdgeInsets.only(left: 20, right: 20, bottom: 2), // Виправлено відступи
+            border: InputBorder.none,
+            isDense: true, // Робить поле компактнішим для кращого центрування
+            suffixIcon: isPass ? IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: const Color(0xFF6F6F80), size: 20),
+              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+            ) : null,
+          ),
+        ),
+      ),
       if (active) _buildValidationRow(m, c, w, v),
     ]);
   }
@@ -188,9 +270,29 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
         Container(width: 101, height: 44, alignment: Alignment.center, decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)), child: Text(p, style: const TextStyle(color: Colors.white, fontSize: 13))),
         const SizedBox(width: 10),
-        Expanded(child: Container(height: 44, alignment: Alignment.center, decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)), child: TextField(controller: _platformControllers[p], onChanged: (v) => _validatePlatform(p, v), onTap: () => setState(() => _activeField = p), textAlignVertical: TextAlignVertical.center, style: const TextStyle(color: Colors.white, fontSize: 14), decoration: const InputDecoration(hintText: 'Enter ID', hintStyle: TextStyle(fontSize: 12, color: Color(0xFF6F6F80)), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 15), isCollapsed: true)))),
+        Expanded(
+          child: Container(
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)),
+            child: TextField(
+              controller: _platformControllers[p],
+              onChanged: (v) => _validatePlatform(p, v),
+              onTap: () { setState(() => _activeField = p); _validatePlatform(p, _platformControllers[p]!.text); },
+              textAlignVertical: TextAlignVertical.center,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: const InputDecoration(
+                hintText: 'Enter ID',
+                hintStyle: TextStyle(fontSize: 12, color: Color(0xFF6F6F80)),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.only(left: 15, right: 15, bottom: 2),
+                isDense: true,
+              ),
+            ),
+          ),
+        ),
       ])),
-      if (active) _buildValidationRow(_pMsgs[p] ?? "", _pColors[p] ?? Colors.grey, 135, _pValid[p] ?? false),
+      if (active) _buildValidationRow(_pMsgs[p] ?? "", _pColors[p] ?? Colors.grey, 155, _pValid[p] ?? false),
     ]);
   }
 
@@ -202,6 +304,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   Widget _buildFinishButton() {
-    return Container(width: double.infinity, height: 55, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: _isFormReady ? const LinearGradient(colors: [Color(0xFF00D1FF), Color(0xFF00F5A0)]) : null, color: _isFormReady ? null : const Color(0xFF2B2B3B), boxShadow: _isFormReady ? [const BoxShadow(color: Color.fromRGBO(0, 255, 209, 0.45), blurRadius: 22)] : []), child: Center(child: Text('Finish setup', style: TextStyle(color: _isFormReady ? const Color(0xFF0F0F1A) : const Color(0xFF6B6B80), fontSize: 16, fontWeight: FontWeight.w700))));
+    return Container(
+      width: double.infinity, height: 55,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: _isFormReady ? const LinearGradient(colors: [Color(0xFF00D1FF), Color(0xFF00F5A0)]) : null,
+        color: _isFormReady ? null : const Color(0xFF2B2B3B),
+        boxShadow: _isFormReady ? [const BoxShadow(color: Color.fromRGBO(0, 255, 209, 0.45), blurRadius: 22)] : [],
+      ),
+      child: Center(child: Text('Finish setup', style: TextStyle(color: _isFormReady ? const Color(0xFF0F0F1A) : const Color(0xFF6B6B80), fontSize: 16, fontWeight: FontWeight.w700))),
+    );
   }
 }
