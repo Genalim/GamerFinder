@@ -1,5 +1,6 @@
+import 'Welcome_screen.dart';
 import 'package:flutter/material.dart';
-import 'profile_setup_screen.dart'; // Переконайся, що шлях вірний
+import 'profile_setup_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -18,7 +19,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.green,
       ),
       // Ось тут замінюємо старий RegistrationScreen на новий
-      home: const ProfileSetupScreen(),
+      home: const WelcomeScreen(),
     );
   }
 }
