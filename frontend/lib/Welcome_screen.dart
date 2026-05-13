@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'profile_setup_screen.dart';
+import 'Game_Selection.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -100,7 +101,7 @@ class WelcomeScreen extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => const ProfileSetupScreen()),
+                        MaterialPageRoute(builder: (context) => const GameSelectionScreen()), // Змінили тут
                       );
                     },
                     child: SizedBox(
