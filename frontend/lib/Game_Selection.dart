@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
 import 'Welcome_screen.dart';
+import 'Chose_your_platform.dart';
 
 class GameModel {
   final String id;
@@ -169,7 +170,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
   OverlayEntry _createOverlayEntry() {
     return OverlayEntry(
       builder: (context) => Positioned(
-        width: 327,
+        width: 360,
         child: CompositedTransformFollower(
           link: _layerLink,
           showWhenUnlinked: false,
@@ -250,8 +251,10 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F1A),
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () {
             _hideOverlay();
             FocusScope.of(context).unfocus();
@@ -301,7 +304,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
   Widget _buildSearchInput() {
     return Container(
-      width: 327, height: 48,
+      width: 360, height: 48,
       decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
@@ -344,9 +347,12 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
     bool hasActiveSelection = _selectedGenres.isNotEmpty && !_selectedGenres.contains('All');
     return Center(
       child: GestureDetector(
-        onTap: () => setState(() => _isFilterOpen = !_isFilterOpen),
+        onTap: () {
+          FocusScope.of(context).unfocus(); // Закрити клавіатуру при відкритті меню
+          setState(() => _isFilterOpen = !_isFilterOpen);
+        },
         child: Container(
-          width: 327, height: 48,
+          width: 360, height: 48,
           decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 15),
           child: Row(
@@ -400,7 +406,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
     return Center(
       child: Container(
-        width: 327, // Ширина як у кнопки фільтра
+        width: 360, // Ширина як у кнопки фільтра
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: GridView.builder(
           shrinkWrap: true,
@@ -418,6 +424,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
             return GestureDetector(
               onTap: () => setState(() {
+                FocusScope.of(context).unfocus(); // Знімаємо клавіатуру при виборі жанру
                 if (isSelected) {
                   _selectedGenres.remove(genre);
                 } else {
@@ -460,19 +467,19 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
   Widget _buildGamesGrid(List<GameModel> filteredGames) {
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 100),
+      padding: const EdgeInsets.fromLTRB(26, 10, 26, 100),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 15,
         mainAxisSpacing: 15,
-        // Встановлюємо 1.0 (квадрат) або навіть 1.05.
-        // Це зріже ту порожнечу знизу, яку ми бачимо на скріншоті.
-        childAspectRatio: 1.02,
+        // Зменшуємо до 0.72, щоб вистачило висоти для назви та жанрів
+        childAspectRatio: 0.79,
       ),
       itemCount: filteredGames.length,
       itemBuilder: (context, index) {
         final game = filteredGames[index];
         final isSelected = _selectedGames.contains(game.name);
+        const accentColor = Color(0xFF00F5A0);
 
         return GestureDetector(
           onTap: () => setState(() => isSelected
@@ -483,11 +490,10 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
               color: const Color(0xFF181826),
               borderRadius: BorderRadius.circular(12),
               border: isSelected
-                  ? Border.all(color: const Color(0xFF00F5A0), width: 2)
+                  ? Border.all(color: accentColor, width: 2)
                   : null,
             ),
             child: Column(
-              // Прибираємо Spacer і використовуємо мінімальний розмір
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
                 const SizedBox(height: 10),
@@ -498,28 +504,41 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                   child: game.isFromApi
                       ? Image.network(
                     game.imageUrl,
-                    width: 135, height: 95,
+                    width: 140,
+                    height: 140,
                     fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => const Icon(Icons.gamepad, color: Colors.white24),
+                    errorBuilder: (c, e, s) =>
+                    const Icon(Icons.gamepad, color: Colors.white24),
                   )
                       : Image.asset(
                     'assets/images/game_images/${game.imageUrl}',
-                    width: 135, height: 95,
+                    width: 140,
+                    height: 140,
                     fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => const Icon(Icons.gamepad, color: Colors.white24),
+                    errorBuilder: (c, e, s) =>
+                    const Icon(Icons.gamepad, color: Colors.white24),
                   ),
                 ),
 
-                // Назва — ТЕПЕР ВІДСТУП МІНІМАЛЬНИЙ
+                // Назва
                 Padding(
                   padding: const EdgeInsets.only(top: 10, left: 8, right: 8),
                   child: Text(
                     game.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w500,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                       fontSize: 14,
-                      color: Colors.white,
+                      // Колір змінюється на зелений при виборі
+                      color: isSelected ? accentColor : Colors.white,
+                      // Ефект світіння при виборі
+                      shadows: isSelected
+                          ? [
+                        Shadow(
+                            color: accentColor.withOpacity(0.8),
+                            blurRadius: 10),
+                      ]
+                          : null,
                     ),
                     textAlign: TextAlign.center,
                     maxLines: 1,
@@ -527,19 +546,28 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                   ),
                 ),
 
-                // Жанр — ПОВЕРНУВСЯ
+                // Жанр
                 Padding(
-                  padding: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
                   child: Text(
-                    // Використовуємо твій список genres
-                    game.genres.isNotEmpty ? game.genres.first : 'Action',
-                    style: const TextStyle(
+                    game.genres.isNotEmpty ? game.genres.join(' / ') : 'Action',
+                    style: TextStyle(
                       fontFamily: 'Poppins',
                       fontWeight: FontWeight.w400,
-                      fontSize: 12,
-                      color: Color(0xA3A3B5),
+                      fontSize: 11,
+                      // Колір змінюється на зелений при виборі, інакше білий 54%
+                      color: isSelected ? accentColor : Colors.white54,
+                      shadows: isSelected
+                          ? [
+                        Shadow(
+                            color: accentColor.withOpacity(0.6),
+                            blurRadius: 8),
+                      ]
+                          : null,
                     ),
                     textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -562,7 +590,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
           }
           print("-----------------------------");
           _hideOverlay();
-          Navigator.push(context, MaterialPageRoute(builder: (context) => const WelcomeScreen()));
+          Navigator.push(context, MaterialPageRoute(builder: (context) => const ChoosePlatformScreen()));
         },
       ),
     );
