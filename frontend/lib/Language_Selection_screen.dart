@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'custom_widgets.dart';
+import 'profile_setup_screen.dart';
 
 class LanguageSelectionScreen extends StatefulWidget {
   const LanguageSelectionScreen({super.key});
@@ -298,8 +299,14 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
       child: NeonGameButton(
         isActive: canContinue,
         onTap: () {
-          if (canContinue) {
-            print("Selected languages: $_selectedLanguages");
+          if (_selectedLanguages.isNotEmpty) {
+            // Додаємо перехід на наступний екран
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ProfileSetupScreen(),
+              ),
+            );
           }
         },
       ),

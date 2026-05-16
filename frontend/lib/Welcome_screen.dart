@@ -31,7 +31,7 @@ class WelcomeScreen extends StatelessWidget {
               width: 142,
               height: 104,
               child: Image.asset(
-                'assets/images/Welcome_screen_games.png',
+                'assets/images/Welcome_screen_games.webp',
                 fit: BoxFit.contain,
               ),
             ),
@@ -82,7 +82,7 @@ class WelcomeScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(100),
                   image: const DecorationImage(
-                    image: AssetImage('assets/images/Welcome_screen_play_and_win.png'),
+                    image: AssetImage('assets/images/Welcome_screen_play_and_win.webp'),
                     fit: BoxFit.cover,
                   ),
                 ),

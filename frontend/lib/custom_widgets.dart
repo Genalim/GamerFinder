@@ -203,6 +203,181 @@ class NeonGameButton extends StatelessWidget {
 }
 
 
+// --- КНОПКА FINISH SETUP (АКТИВНА - ПОВНА ВЕРСІЯ) ---
+const String _svgFinishActive = '''<svg width="371" height="100" viewBox="0 0 371 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_ddi_70_396)">
+<line x1="318.98" y1="72.8051" x2="211.767" y2="72.8051" stroke="#00E5C9"/>
+<line x1="52.0197" y1="27.1949" x2="159.233" y2="27.1949" stroke="#00E5C9"/>
+<line x1="284.672" y1="76.6017" x2="177.459" y2="76.6017" stroke="#00E5C9"/>
+<line x1="86.3279" y1="23.3983" x2="193.541" y2="23.3983" stroke="#00E5C9"/>
+<line x1="189.252" y1="72.8051" x2="82.0393" y2="72.8051" stroke="#00E5C9"/>
+<line x1="181.748" y1="27.1949" x2="288.961" y2="27.1949" stroke="#00E5C9"/>
+<line x1="31.6492" y1="72.7543" x2="63.8131" y2="72.7543" stroke="#00E5C9"/>
+<line x1="23.5721" y1="32.4407" x2="23.5721" y2="67.5593" stroke="#00E5C9"/>
+<line y1="-0.5" x2="35.1187" y2="-0.5" transform="matrix(0 1 1 0 347.928 32.4407)" stroke="#00E5C9"/>
+<line x1="31.0771" y1="38.1356" x2="31.0771" y2="61.8644" stroke="#00E5C9"/>
+<line y1="-0.5" x2="23.7288" y2="-0.5" transform="matrix(0 1 1 0 340.423 38.1356)" stroke="#00E5C9"/>
+<line x1="339.351" y1="27.2457" x2="307.187" y2="27.2457" stroke="#00E5C9"/>
+<line x1="307.187" y1="76.5509" x2="346.856" y2="76.5509" stroke="#00E5C9"/>
+<line x1="63.8132" y1="23.4491" x2="24.1444" y2="23.4491" stroke="#00E5C9"/>
+<line x1="148.511" y1="76.6017" x2="41.2984" y2="76.6017" stroke="#00E5C9"/>
+<line x1="222.488" y1="23.3983" x2="329.702" y2="23.3983" stroke="#00E5C9"/>
+<rect x="79.895" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="291.105" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 291.105 28.644)" fill="#00D7EC"/>
+<rect x="62.7411" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="25.2164" y="66.6101" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 25.2164 66.6101)" fill="#00D7EC"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 345.783 66.6101)" fill="#00D7EC"/>
+<rect x="32.7213" y="60.9153" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 32.7213 60.9153)" fill="#00D7EC"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 338.279 60.9153)" fill="#00D7EC"/>
+<rect x="308.259" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 308.259 28.644)" fill="#00D7EC"/>
+<rect x="345.783" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="25.2164" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 25.2164 24.8475)" fill="#00D7EC"/>
+<rect x="29.5049" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="25.2164" y="30.5424" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 25.2164 30.5424)" fill="#00D7EC"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 345.783 30.5424)" fill="#00D7EC"/>
+<rect x="32.7213" y="36.2373" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 32.7213 36.2373)" fill="#00D7EC"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 338.279 36.2373)" fill="#00D7EC"/>
+<rect x="38.082" y="26.7457" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 38.082 26.7457)" fill="#00D7EC"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 333.99 69.4576)" fill="#00D7EC"/>
+<rect x="341.495" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 341.495 28.644)" fill="#00D7EC"/>
+<rect x="305.043" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="65.9574" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 65.9574 24.8475)" fill="#00D7EC"/>
+<rect x="209.623" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="161.377" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 161.377 28.644)" fill="#00D7EC"/>
+<rect x="317.908" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="53.0918" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 53.0918 28.644)" fill="#00D7EC"/>
+<rect x="188.18" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="182.82" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 182.82 28.644)" fill="#00D7EC"/>
+<rect x="175.315" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="195.685" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 195.685 24.8475)" fill="#00D7EC"/>
+<rect x="283.6" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="87.4" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 87.4 24.8475)" fill="#00D7EC"/>
+<rect x="147.439" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="223.561" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 223.561 24.8475)" fill="#00D7EC"/>
+<rect x="39.1541" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect x="22" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#00D7EC"/>
+<rect width="3.21639" height="2.84746" rx="1.42373" transform="matrix(-1 0 0 1 349 22)" fill="#00D7EC"/>
+<rect x="331.846" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 331.846 24.8475)" fill="#00D7EC"/>
+<rect x="38.082" y="31.4916" width="294.836" height="37.9661" rx="12" fill="url(#paint0_linear_70_396)"/>
+<text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle" fill="#0F0F1A" style="font-family: Poppins; font-weight: 800; font-size: 15px;">FINISH SETUP</text>
+</g>
+<defs>
+<filter id="filter0_ddi_70_396" x="0" y="0" width="371" height="99.9999" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="5"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 1 0 0 0 0 0.819608 0 0 0 0.7 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_70_396"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="11"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 1 0 0 0 0 0.819608 0 0 0 0.45 0"/>
+<feBlend mode="normal" in2="effect1_dropShadow_70_396" result="effect2_dropShadow_70_396"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect2_dropShadow_70_396" result="shape"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="5"/>
+<feComposite in2="hardAlpha" operator="arithmetic" k2="-1" k3="1"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0.415686 0 0 0 0 0 0 0 0 0 1 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="effect3_innerShadow_70_396" result="effect3_innerShadow_70_396"/>
+</filter>
+<linearGradient id="paint0_linear_70_396" x1="38.082" y1="50.4746" x2="332.918" y2="50.4746" gradientUnits="userSpaceOnUse">
+<stop stop-color="#00D1FF"/>
+<stop offset="1" stop-color="#00F5A0"/>
+</linearGradient>
+</defs>
+</svg>''';
+
+// --- КНОПКА FINISH SETUP (НЕАКТИВНА - ПОВНА ВЕРСІЯ) ---
+const String _svgFinishInactive = '''<svg width="371" height="100" viewBox="0 0 371 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g>
+<line x1="318.98" y1="72.8051" x2="211.767" y2="72.8051" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="52.0197" y1="27.1949" x2="159.233" y2="27.1949" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="284.672" y1="76.6017" x2="177.459" y2="76.6017" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="86.3279" y1="23.3983" x2="193.541" y2="23.3983" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="189.252" y1="72.8051" x2="82.0393" y2="72.8051" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="181.748" y1="27.1949" x2="288.961" y2="27.1949" stroke="#7A7A8C" stroke-width="1.2"/>
+<line x1="31.6492" y1="72.7543" x2="63.8131" y2="72.7543" stroke="#7A7A8C"/>
+<line x1="23.5721" y1="32.4407" x2="23.5721" y2="67.5593" stroke="#7A7A8C"/>
+<line y1="-0.5" x2="35.1187" y2="-0.5" transform="matrix(0 1 1 0 347.928 32.4407)" stroke="#7A7A8C"/>
+<line x1="31.0771" y1="38.1356" x2="31.0771" y2="61.8644" stroke="#7A7A8C"/>
+<line y1="-0.5" x2="23.7288" y2="-0.5" transform="matrix(0 1 1 0 340.423 38.1356)" stroke="#7A7A8C"/>
+<line x1="339.351" y1="27.2457" x2="307.187" y2="27.2457" stroke="#7A7A8C"/>
+<line x1="307.187" y1="76.5509" x2="346.856" y2="76.5509" stroke="#7A7A8C"/>
+<line x1="63.8132" y1="23.4491" x2="24.1444" y2="23.4491" stroke="#7A7A8C"/>
+<line x1="148.511" y1="76.6017" x2="41.2984" y2="76.6017" stroke="#7A7A8C"/>
+<line x1="222.488" y1="23.3983" x2="329.702" y2="23.3983" stroke="#7A7A8C"/>
+<rect x="79.895" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="291.105" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 291.105 28.644)" fill="#7A7A8C"/>
+<rect x="62.7411" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="25.2164" y="66.6101" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 25.2164 66.6101)" fill="#7A7A8C"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 345.783 66.6101)" fill="#7A7A8C"/>
+<rect x="32.7213" y="60.9153" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 32.7213 60.9153)" fill="#7A7A8C"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 338.279 60.9153)" fill="#7A7A8C"/>
+<rect x="308.259" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 308.259 28.644)" fill="#7A7A8C"/>
+<rect x="345.783" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="25.2164" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 25.2164 24.8475)" fill="#7A7A8C"/>
+<rect x="29.5049" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="25.2164" y="30.5424" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 25.2164 30.5424)" fill="#7A7A8C"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 345.783 30.5424)" fill="#7A7A8C"/>
+<rect x="32.7213" y="36.2373" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 32.7213 36.2373)" fill="#7A7A8C"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 338.279 36.2373)" fill="#7A7A8C"/>
+<rect x="38.082" y="26.7457" width="2.84746" height="3.21639" rx="1.42373" transform="rotate(90 38.082 26.7457)" fill="#7A7A8C"/>
+<rect width="2.84746" height="3.21639" rx="1.42373" transform="matrix(0 1 1 0 333.99 69.4576)" fill="#7A7A8C"/>
+<rect x="341.495" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 341.495 28.644)" fill="#7A7A8C"/>
+<rect x="305.043" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="65.9574" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 65.9574 24.8475)" fill="#7A7A8C"/>
+<rect x="209.623" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="161.377" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 161.377 28.644)" fill="#7A7A8C"/>
+<rect x="317.908" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="53.0918" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 53.0918 28.644)" fill="#7A7A8C"/>
+<rect x="188.18" y="71.356" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="182.82" y="28.644" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 182.82 28.644)" fill="#7A7A8C"/>
+<rect x="175.315" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="195.685" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 195.685 24.8475)" fill="#7A7A8C"/>
+<rect x="283.6" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="87.4" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 87.4 24.8475)" fill="#7A7A8C"/>
+<rect x="147.439" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="223.561" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 223.561 24.8475)" fill="#7A7A8C"/>
+<rect x="39.1541" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect x="22" y="75.1525" width="3.21639" height="2.84746" rx="1.42373" fill="#7A7A8C"/>
+<rect width="3.21639" height="2.84746" rx="1.42373" transform="matrix(-1 0 0 1 349 22)" fill="#7A7A8C"/>
+<rect x="331.846" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 331.846 24.8475)" fill="#7A7A8C"/>
+<rect x="38.082" y="31.4916" width="294.836" height="37.9661" rx="12" fill="#3A3A4A"/>
+<text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle" fill="#A3A3B5" style="font-family: Poppins; font-weight: 800; font-size: 15px;">FINISH SETUP</text>
+</g>
+</svg>''';
+
+class NeonFinishButton extends StatelessWidget {
+  final bool isActive;
+  final VoidCallback? onTap;
+
+  const NeonFinishButton({super.key, required this.isActive, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isActive ? onTap : null,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: SizedBox(
+          key: ValueKey<bool>(isActive),
+          height: 102,
+          width: double.infinity,
+          child: SvgPicture.string(
+            isActive ? _svgFinishActive : _svgFinishInactive,
+            fit: BoxFit.fill,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
 // =============================================================================
 // ПОРАДА: Сюди можна додавати інші кастомні віджети (текстові поля, картки тощо)
 // просто створюючи нові класи нижче.

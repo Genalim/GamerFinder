@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
   flutter_svg: ^2.3.0
+  image_picker: ^1.2.2
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -59,6 +61,8 @@ flutter:
     - assets/images/game_images/
     - assets/images/Platforms/
     - assets/images/PlayStyles/
+    - assets/avatars/free/
+    - assets/avatars/pro/
 
   #Fonts connect
   fonts:
@@ -67,6 +71,10 @@ flutter:
         - asset: assets/fonts/Poppins-Regular.ttf
         - asset: assets/fonts/Poppins-Bold.ttf
           weight: 700
+    - family: Love Light
+      fonts:
+        - asset: assets/fonts/LoveLight-Regular.ttf
+
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

@@ -1,4 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'custom_widgets.dart';
+import 'package:flutter/services.dart';
+import 'Email_verification_screen.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -8,6 +13,9 @@ class ProfileSetupScreen extends StatefulWidget {
 }
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
+  List<String> _freeAvatars = [];
+  List<String> _proAvatars = [];
+  bool _isLoadingAssets = true;
   final TextEditingController _nicknameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -21,7 +29,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   };
 
   String _activeField = "";
-  bool _nickValid = false, _emailValid = false, _passValid = false, _obscurePassword = true;
+  bool _nickValid = false,
+      _emailValid = false,
+      _passValid = false,
+      _obscurePassword = true;
+
+  // Логіка аватарок
+  String? _selectedAvatarPath;
+  File? _imageFile;
+  bool _isFreeTab = true;
+  final ImagePicker _picker = ImagePicker();
 
   String _nickMsg = "3–20 characters, letters, numbers, . or _ only";
   Color _nickColor = const Color(0xFF6F6F80);
@@ -44,6 +61,52 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadAvatarAssets();
+  }
+
+  Future<void> _loadAvatarAssets() async {
+    try {
+      // Читаємо маніфест усіх асетів додатка
+      final manifest = await AssetManifest.loadFromAssetBundle(DefaultAssetBundle.of(context));
+
+      // Знаходимо всі файли в потрібних папках
+      final freePaths = manifest.listAssets().where((path) =>
+      path.startsWith('assets/avatars/free/') &&
+          (path.endsWith('.webp') || path.endsWith('.jpg'))
+      ).toList();
+
+      final proPaths = manifest.listAssets().where((path) =>
+      path.startsWith('assets/avatars/pro/') &&
+          (path.endsWith('.webp') || path.endsWith('.jpg'))
+      ).toList();
+
+      // Сортуємо за назвою, щоб avatar_1 був перед avatar_2
+      freePaths.sort();
+      proPaths.sort();
+
+      if (mounted) {
+        setState(() {
+          _freeAvatars = freePaths;
+          _proAvatars = proPaths;
+          _isLoadingAssets = false;
+        });
+
+        // Фонове кешування, щоб відкривалось миттєво
+        for (var path in freePaths) {
+          precacheImage(AssetImage(path), context);
+        }
+        for (var path in proPaths) {
+          precacheImage(AssetImage(path), context);
+        }
+      }
+    } catch (e) {
+      print("Error loading avatar assets: $e");
+    }
+  }
+
   String _getInitialHint(String p) {
     if (p == 'Discord') return "Format: Username#1234";
     if (p == 'Guilded') return "Format: username#123";
@@ -52,6 +115,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   bool get _isFormReady => _nickValid && _emailValid && _passValid;
+
+  Future<void> _pickImage(ImageSource source) async {
+    final XFile? pickedFile = await _picker.pickImage(source: source);
+    if (pickedFile != null) {
+      setState(() {
+        _imageFile = File(pickedFile.path);
+        _selectedAvatarPath = null;
+      });
+    }
+  }
 
   void _validateNick(String v) {
     setState(() {
@@ -121,14 +194,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     setState(() {
       bool isValid = false;
       String error = "";
-
       if (v.isEmpty) {
         _pMsgs[p] = _getInitialHint(p);
         _pColors[p] = const Color(0xFF6F6F80);
         _pValid[p] = false;
         return;
       }
-
       if (p == 'Discord') {
         isValid = RegExp(r'^.{2,32}#[0-9]{4}$').hasMatch(v);
         error = "Format: Name#1234 (4 digits)";
@@ -148,46 +219,276 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         if (v.contains(' ')) error = "Spaces not allowed";
         else error = "3–20 chars, letters, numbers, . or _";
       }
-
       _pMsgs[p] = isValid ? "$p looks good" : error;
       _pColors[p] = isValid ? const Color(0xFF00F5A0) : const Color(0xFFFF3B5C);
       _pValid[p] = isValid;
     });
   }
 
+  void _showAvatarPicker() {
+    String? tempPath = _selectedAvatarPath;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            List<String> currentAvatars = _isFreeTab ? _freeAvatars : _proAvatars;
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.8,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0F1A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+
+                  // РЯДОК З ТАБАМИ ТА ХРЕСТИКОМ
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        _buildTabItem('FREE', _isFreeTab, () => setModalState(() => _isFreeTab = true)),
+                        const SizedBox(width: 10),
+                        _buildTabItem('PRO', !_isFreeTab, () => setModalState(() => _isFreeTab = false)),
+                        const Spacer(),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close, color: Colors.white54, size: 24),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  const Text(
+                    'Choose your avatar',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+
+                  // ОСНОВНА ЗОНА З СІТКОЮ ТА НАДПИСОМ
+                  Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(15),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161622),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white.withOpacity(0.05)),
+                      ),
+                      child: _isLoadingAssets
+                          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0)))
+                          : Stack(
+                        children: [
+                          // 1. СІТКА АВАТАРОК
+                          GridView.builder(
+                            physics: const BouncingScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 15,
+                              crossAxisSpacing: 15,
+                            ),
+                            itemCount: currentAvatars.length,
+                            itemBuilder: (context, index) {
+                              String path = currentAvatars[index];
+                              bool isSelected = tempPath == path;
+
+                              return GestureDetector(
+                                onTap: () => setModalState(() => tempPath = path),
+                                child: RepaintBoundary(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isSelected ? const Color(0xFF00F5A0) : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: ClipOval(
+                                      child: Stack(
+                                        children: [
+                                          Image.asset(
+                                            path,
+                                            fit: BoxFit.cover,
+                                            width: 100,
+                                            height: 100,
+                                            cacheWidth: 150,
+                                            filterQuality: FilterQuality.low,
+                                          ),
+                                          if (!_isFreeTab) ...[
+                                            Container(color: Colors.black.withOpacity(0.6)),
+                                            const Center(
+                                              child: Icon(
+                                                Icons.lock_outline,
+                                                color: Colors.white24,
+                                                size: 22,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+
+                          // 2. ЗАФІКСОВАНИЙ НАПИС (Тільки для PRO)
+                          if (!_isFreeTab)
+                            Positioned(
+                              bottom: 185, // ПІДНЯЛИ ВИЩЕ (було 40), тепер плаває чітко над нижнім рядком
+                              left: 0,
+                              right: 0,
+                              child: IgnorePointer( // Щоб тапи клікали аватарки під написом
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  color: Colors.transparent,
+                                  child: RichText(
+                                    textAlign: TextAlign.center,
+                                    text: const TextSpan(
+                                      style: TextStyle(
+                                        fontFamily: 'Poppins',
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.white,
+                                      ),
+                                      children: [
+                                        TextSpan(text: 'Unlock with GameBuddy PRO in '),
+                                        TextSpan(
+                                          text: 'Settings', // ПІДСВІЧУЄМО САМЕ ЦЕ СЛОВО
+                                          style: TextStyle(
+                                            color: Color(0xFF00F5A0), // Твій фірмовий неоновий зелений
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // КНОПКА ЗБЕРЕЖЕННЯ ЗНИЗУ
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 30),
+                    child: NeonGameButton(
+                      isActive: tempPath != null,
+                      onTap: () {
+                        if (tempPath != null) {
+                          setState(() {
+                            _selectedAvatarPath = tempPath;
+                            _imageFile = null;
+                          });
+                          Navigator.pop(context);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTabItem(String label, bool isActive, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF181826) : Colors.transparent,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+          border: isActive ? Border.all(color: const Color(0xFF00F5A0), width: 1) : null,
+        ),
+        child: Text(label, style: TextStyle(color: isActive ? const Color(0xFF00F5A0) : Colors.white38, fontWeight: FontWeight.bold, fontSize: 14)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Перевіряємо, чи відкрита зараз клавіатура
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return GestureDetector(
-      onTap: () { setState(() => _activeField = ""); FocusScope.of(context).unfocus(); },
+      onTap: () {
+        setState(() => _activeField = "");
+        FocusScope.of(context).unfocus();
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFF0F0F13),
+        // ДОЗВОЛЯЄМО екрану підлаштовуватись під клавіатуру, щоб бачити нижні поля
+        resizeToAvoidBottomInset: true,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 33),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 40),
-                      const Text('Profile Setup', style: TextStyle(fontFamily: 'Poppins', fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-                      const SizedBox(height: 30),
-                      _buildAvatarBlock(),
-                      const SizedBox(height: 40),
-                      _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 145),
-                      const SizedBox(height: 10),
-                      _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 145),
-                      const SizedBox(height: 10),
-                      _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 145, isPass: true),
-                      const SizedBox(height: 30),
-                      const Text('Connected Platforms (optional)', style: TextStyle(fontFamily: 'Poppins', fontSize: 16, color: Colors.white)),
-                      const SizedBox(height: 15),
-                      ..._platformControllers.keys.map((p) => _buildPlatformBlock(p)).toList(),
-                    ],
+              Column(
+                children: [
+                  _buildAppBar('Profile Setup'),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      // Якщо клавіатура закрита — робимо відступ під кнопку, якщо відкрита — мінімальний
+                      padding: EdgeInsets.fromLTRB(33, 0, 33, isKeyboardOpen ? 20 : 120),
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 30),
+                          _buildAvatarBlock(),
+                          const SizedBox(height: 40),
+                          _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 145),
+                          const SizedBox(height: 10),
+                          _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 145),
+                          const SizedBox(height: 10),
+                          _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 145, isPass: true),
+                          const SizedBox(height: 30),
+                          const Text('Connected Platforms (optional)', style: TextStyle(fontFamily: 'Poppins', fontSize: 16, color: Colors.white)),
+                          const SizedBox(height: 15),
+                          ..._platformControllers.keys.map((p) => _buildPlatformBlock(p)).toList(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Кнопка відображається ТІЛЬКИ тоді, коли клавіатура СХОВАНА
+              if (!isKeyboardOpen)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: 120,
+                  child: Container(
+                    alignment: Alignment.center,
+                    color: const Color(0xFF0F0F13),
+                    child: _buildFinishButton(),
                   ),
                 ),
-              ),
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 33, vertical: 20), child: _buildFinishButton()),
             ],
           ),
         ),
@@ -195,28 +496,69 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
+  Widget _buildAppBar(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 24),
+            onPressed: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, fontFamily: 'Poppins'),
+            ),
+          ),
+          const SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAvatarBlock() {
     return Column(
       children: [
-        Container(
-          width: 100, height: 100,
-          decoration: BoxDecoration(color: const Color(0xFF181826), shape: BoxShape.circle, border: Border.all(color: const Color(0xFF00F5A0), width: 1)),
-          child: const Center(child: Icon(Icons.camera, size: 50, color: Color(0xFF00F5A0))),
+        GestureDetector(
+          onTap: () => _pickImage(ImageSource.camera),
+          child: Container(
+            width: 100, height: 100,
+            decoration: BoxDecoration(
+              color: const Color(0xFF181826),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF00F5A0), width: 1),
+              image: _imageFile != null
+                  ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover)
+                  : (_selectedAvatarPath != null
+                  ? DecorationImage(image: AssetImage(_selectedAvatarPath!), fit: BoxFit.cover)
+                  : null),
+            ),
+            child: (_imageFile == null && _selectedAvatarPath == null)
+                ? const Center(child: Icon(Icons.camera, size: 50, color: Color(0xFF00F5A0)))
+                : null,
+          ),
         ),
         const SizedBox(height: 15),
-        Stack(
-          alignment: Alignment.topCenter,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const SizedBox(width: 80),
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('Take a photo or', style: TextStyle(color: Color(0xFF6F6F80), fontSize: 10, fontFamily: 'Poppins')),
                 const SizedBox(height: 4),
-                const Text('Upload Avatar', style: TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins', decoration: TextDecoration.underline)),
+                GestureDetector(
+                  onTap: () => _pickImage(ImageSource.gallery),
+                  child: const Text('Upload Avatar', style: TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins', decoration: TextDecoration.underline)),
+                ),
               ],
             ),
-            Align(
-              alignment: Alignment.centerRight,
+            GestureDetector(
+              onTap: _showAvatarPicker,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: const [
@@ -236,21 +578,27 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     return Column(children: [
       Container(
         height: 48,
-        alignment: Alignment.center, // Додано для центрування вмісту в контейнері
+        alignment: Alignment.center,
         decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12)),
         child: TextField(
           controller: ctrl,
           onChanged: onCh,
           onTap: () { setState(() => _activeField = id); onCh(ctrl.text); },
           obscureText: isPass ? _obscurePassword : false,
-          textAlignVertical: TextAlignVertical.center, // Суворе центрування
+          textAlign: TextAlign.center,
+          textAlignVertical: TextAlignVertical.center,
+          cursorColor: const Color(0xFF00F5A0), // Гарний неоновий курсор
           style: const TextStyle(color: Colors.white, fontSize: 14),
           decoration: InputDecoration(
             hintText: h,
             hintStyle: const TextStyle(color: Color(0xFF6F6F80)),
-            contentPadding: const EdgeInsets.only(left: 20, right: 20, bottom: 2), // Виправлено відступи
+            contentPadding: EdgeInsets.zero,
             border: InputBorder.none,
-            isDense: true, // Робить поле компактнішим для кращого центрування
+            isDense: true,
+            // СТВОРЮЄМО НЕВИДИМУ "ПРОТИВАГУ" ЗЛІВА ДЛЯ ОКА
+            prefixIcon: isPass
+                ? const Opacity(opacity: 0, child: Icon(Icons.visibility, size: 20))
+                : null,
             suffixIcon: isPass ? IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -279,13 +627,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               controller: _platformControllers[p],
               onChanged: (v) => _validatePlatform(p, v),
               onTap: () { setState(() => _activeField = p); _validatePlatform(p, _platformControllers[p]!.text); },
+              textAlign: TextAlign.center,
               textAlignVertical: TextAlignVertical.center,
               style: const TextStyle(color: Colors.white, fontSize: 14),
               decoration: const InputDecoration(
                 hintText: 'Enter ID',
                 hintStyle: TextStyle(fontSize: 12, color: Color(0xFF6F6F80)),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.only(left: 15, right: 15, bottom: 2),
+                contentPadding: EdgeInsets.zero,
                 isDense: true,
               ),
             ),
@@ -297,22 +646,31 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   Widget _buildValidationRow(String m, Color c, double w, bool v) {
-    return Padding(padding: const EdgeInsets.only(top: 4, bottom: 8), child: Row(children: [
-      Expanded(child: Center(child: SizedBox(width: w, child: Text(m, textAlign: TextAlign.center, style: TextStyle(fontFamily: 'Poppins', fontSize: 10, color: c, height: 1.2))))),
-      Container(width: 156, height: 44, decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12), border: v ? Border.all(color: const Color(0xFF00F5A0)) : null), child: Center(child: Text('Save', style: TextStyle(color: v ? Colors.white : const Color(0xFF6F6F80), fontSize: 14)))),
-    ]));
+    return Padding(padding: const EdgeInsets.only(top: 4, bottom: 8),
+        child: Row(children: [
+          Expanded(child: Center(child: SizedBox(width: w, child: Text(m, textAlign: TextAlign.center, style: TextStyle(fontFamily: 'Poppins', fontSize: 10, color: c, height: 1.2))))),
+          Container(width: 156, height: 44, decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12), border: v ? Border.all(color: const Color(0xFF00F5A0)) : null), child: Center(child: Text('Save', style: TextStyle(color: v ? Colors.white : const Color(0xFF6F6F80), fontSize: 14)))),
+        ]));
   }
 
   Widget _buildFinishButton() {
-    return Container(
-      width: double.infinity, height: 55,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        gradient: _isFormReady ? const LinearGradient(colors: [Color(0xFF00D1FF), Color(0xFF00F5A0)]) : null,
-        color: _isFormReady ? null : const Color(0xFF2B2B3B),
-        boxShadow: _isFormReady ? [const BoxShadow(color: Color.fromRGBO(0, 255, 209, 0.45), blurRadius: 22)] : [],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: NeonFinishButton(
+        isActive: _isFormReady,
+        onTap: () {
+          if (_isFormReady) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EmailVerificationScreen(
+                  email: _emailController.text, // Передаємо введений імейл
+                ),
+              ),
+            );
+          }
+        },
       ),
-      child: Center(child: Text('Finish setup', style: TextStyle(color: _isFormReady ? const Color(0xFF0F0F1A) : const Color(0xFF6B6B80), fontSize: 16, fontWeight: FontWeight.w700))),
     );
   }
 }
