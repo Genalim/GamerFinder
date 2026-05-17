@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'custom_widgets.dart';
 import 'Choose_your_playstyle.dart';
+import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР
 
 class ChoosePlatformScreen extends StatefulWidget {
   const ChoosePlatformScreen({super.key});
@@ -10,7 +11,10 @@ class ChoosePlatformScreen extends StatefulWidget {
 }
 
 class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
-  final Set<String> _selectedPlatforms = {};
+  // === 2. ПІДКЛЮЧАЄМО МЕНЕДЖЕР СТАНУ ===
+  final _manager = ProfileSetupManager.instance;
+
+  late Set<String> _selectedPlatforms; // Міняємо на late
 
   // Оновлюємо список: додаємо точне ім'я файлу для кожної платформи
   final List<Map<String, String>> _platforms = [
@@ -20,6 +24,14 @@ class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
     {'name': 'Switch', 'file': 'Switch.png'},
     {'name': 'Xbox', 'file': 'Xbox.png'},
   ];
+
+  // === 3. ІНІЦІАЛІЗАЦІЯ СТАНУ ПРИ ПОВЕРНЕННІ ===
+  @override
+  void initState() {
+    super.initState();
+    // Підтягуємо раніше вибрані платформи, якщо користувач тут уже був
+    _selectedPlatforms = Set.from(_manager.selectedPlatforms);
+  }
 
   void _togglePlatform(String name) {
     setState(() {
@@ -96,7 +108,11 @@ class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
           IconButton(
             icon: const Icon(
                 Icons.arrow_back_ios_new, color: Colors.white, size: 24),
-            onPressed: () => Navigator.pop(context),
+            // ОНОВЛЕНО ТУТ: Перед виходом назад страхуємо вибір в менеджері
+            onPressed: () {
+              _manager.selectedPlatforms = _selectedPlatforms;
+              Navigator.pop(context);
+            },
           ),
           Expanded(
             child: Text(
@@ -138,14 +154,11 @@ class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
                 color: const Color(0xFF0D0D17),
                 borderRadius: BorderRadius.circular(10),
               ),
-              // Замість PlatformIcon тепер просто Image.asset
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Image.asset(
                   'assets/images/Platforms/${platform['file']}',
                   fit: BoxFit.contain,
-                  // Якщо картинки мають білий фон або ти хочеш додати ефект
-                  // можна використати color та colorBlendMode, але для неону краще без них
                 ),
               ),
             ),
@@ -172,7 +185,9 @@ class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
         isActive: _selectedPlatforms.isNotEmpty,
         onTap: () {
           if (_selectedPlatforms.isNotEmpty) {
-            // Додаємо перехід на наступний екран
+            // === 4. ЗБЕРІГАЄМО ВИБІР ПЕРЕД ПЕРЕХОДОМ ВГОРУ ===
+            _manager.selectedPlatforms = _selectedPlatforms;
+
             Navigator.push(
               context,
               MaterialPageRoute(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'custom_widgets.dart';
 import 'profile_setup_screen.dart';
+import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР
 
 class LanguageSelectionScreen extends StatefulWidget {
   const LanguageSelectionScreen({super.key});
@@ -10,8 +11,11 @@ class LanguageSelectionScreen extends StatefulWidget {
 }
 
 class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
+  // === 2. ПІДКЛЮЧАЄМО МЕНЕДЖЕР СТАНУ ===
+  final _manager = ProfileSetupManager.instance;
+
   final TextEditingController _searchController = TextEditingController();
-  final Set<String> _selectedLanguages = {};
+  late Set<String> _selectedLanguages; // Міняємо на late
   String _searchQuery = '';
 
   final List<Map<String, String>> _allLanguages = [
@@ -59,6 +63,13 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
     {'name': 'বাংলা', 'sub': 'Bengali', 'code': 'BN'},
   ];
 
+  // === 3. ІНІЦІАЛІЗАЦІЯ СТАНУ ПРИ ПОВЕРНЕННІ ===
+  @override
+  void initState() {
+    super.initState();
+    _selectedLanguages = Set.from(_manager.selectedLanguages);
+  }
+
   List<Map<String, String>> get _filteredLanguages {
     if (_searchQuery.isEmpty) return _allLanguages;
     return _allLanguages.where((lang) {
@@ -99,10 +110,10 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 160),
                     child: Center(
                       child: SizedBox(
-                        width: 360, // Ширина збігається з рядком пошуку
+                        width: 360,
                         child: Wrap(
                           alignment: WrapAlignment.start,
-                          spacing: 10, // Мінімальна щелина між картками
+                          spacing: 10,
                           runSpacing: 12,
                           children: _filteredLanguages.map((lang) {
                             final isSelected = _selectedLanguages.contains(lang['code']);
@@ -141,7 +152,11 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 24),
-            onPressed: () => Navigator.pop(context),
+            // ОНОВЛЕНО ТУТ: Страхуємо стан перед виходом назад
+            onPressed: () {
+              _manager.selectedLanguages = _selectedLanguages;
+              Navigator.pop(context);
+            },
           ),
           Expanded(
             child: Text(
@@ -219,7 +234,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
         });
       },
       child: Container(
-        width: 175, // Збільшена ширина для заповнення простору
+        width: 175,
         height: 48,
         decoration: BoxDecoration(
           color: const Color(0xFF181826),
@@ -300,7 +315,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
         isActive: canContinue,
         onTap: () {
           if (_selectedLanguages.isNotEmpty) {
-            // Додаємо перехід на наступний екран
+            // === 4. ЗБЕРІГАЄМО ВИБРАНІ МОВИ ПЕРЕД ПЕРЕХОДОМ ===
+            _manager.selectedLanguages = _selectedLanguages;
+
             Navigator.push(
               context,
               MaterialPageRoute(

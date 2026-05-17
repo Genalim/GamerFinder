@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'custom_widgets.dart';
 import 'Language_Selection_screen.dart';
+import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР
 
 class PlayStyleScreen extends StatefulWidget {
   const PlayStyleScreen({super.key});
@@ -11,9 +12,12 @@ class PlayStyleScreen extends StatefulWidget {
 }
 
 class _PlayStyleScreenState extends State<PlayStyleScreen> {
-  final Set<String> _selectedStyles = {};
-  final Set<String> _selectedTimes = {};
-  bool _useVoiceChat = false;
+  // === 2. ПІДКЛЮЧАЄМО МЕНЕДЖЕР СТАНУ ===
+  final _manager = ProfileSetupManager.instance;
+
+  late Set<String> _selectedStyles;
+  late Set<String> _selectedTimes;  // Повертаємо на повноцінний late сет
+  late bool _useVoiceChat;
 
   final List<Map<String, String>> _styles = [
     {
@@ -40,6 +44,17 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
 
   final List<String> _times = ['Morning', 'Afternoon', 'Evening', 'Late night'];
 
+  // === 3. ПІДТЯГУЄМО СТАН З ПАМ'ЯТІ ===
+  @override
+  void initState() {
+    super.initState();
+    _selectedStyles = Set.from(_manager.selectedPlayStyles);
+    // ОНОВЛЕНО: Тепер залізно підтягуємо повноцінний сет часу
+    _selectedTimes = Set.from(_manager.selectedTimes);
+    _useVoiceChat = _manager.useVoiceChat;
+  }
+
+  // ОНОВЛЕНО: Повертаємо чистий множинний вибір для обох сетів
   void _toggleSelection(Set<String> selectionSet, String value) {
     setState(() {
       if (selectionSet.contains(value)) {
@@ -64,11 +79,9 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
                 _buildAppBar('Choose your play style'),
                 Expanded(
                   child: SingleChildScrollView(
-                    // Зменшив верхній паддінг з 26 до 10
                     padding: const EdgeInsets.fromLTRB(26, 0, 26, 120),
                     child: Column(
                       children: [
-                        // Зменшив відступ від заголовка до карток з 20 до 5
                         const SizedBox(height: 5),
                         Wrap(
                           spacing: 15,
@@ -121,7 +134,6 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
     );
   }
 
-  // НОВИЙ ВІДЖЕТ ТУГЛА (FIGMA STYLE)
   Widget _buildVoiceChatToggle(Color accentColor) {
     return SizedBox(
       width: 197,
@@ -195,7 +207,13 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
           IconButton(
             icon: const Icon(
                 Icons.arrow_back_ios_new, color: Colors.white, size: 24),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              // ОНОВЛЕНО: Фіксуємо повноцінний малтипл-сет при виході назад
+              _manager.selectedPlayStyles = _selectedStyles;
+              _manager.selectedTimes = _selectedTimes;
+              _manager.useVoiceChat = _useVoiceChat;
+              Navigator.pop(context);
+            },
           ),
           Expanded(
             child: Text(
@@ -309,11 +327,13 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
         isActive: canContinue,
         onTap: () {
           if (canContinue) {
-            // Друкуємо лог для перевірки
-            print(
-                "Styles: $_selectedStyles, Times: $_selectedTimes, Voice: $_useVoiceChat");
+            print("Styles: $_selectedStyles, Times: $_selectedTimes, Voice: $_useVoiceChat");
 
-            // Виконуємо перехід на новий екран вибору мов
+            // ОНОВЛЕНО: Фіксуємо повноцінний малтипл-сет при переході вперед
+            _manager.selectedPlayStyles = _selectedStyles;
+            _manager.selectedTimes = _selectedTimes;
+            _manager.useVoiceChat = _useVoiceChat;
+
             Navigator.push(
               context,
               MaterialPageRoute(

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'custom_widgets.dart';
 import 'package:flutter/services.dart';
 import 'Email_verification_screen.dart';
+import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР СТАНУ
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -13,12 +14,17 @@ class ProfileSetupScreen extends StatefulWidget {
 }
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
+  // === 2. ПІДКЛЮЧАЄМО ЄДИНИЙ МЕНЕДЖЕР ===
+  final _manager = ProfileSetupManager.instance;
+
   List<String> _freeAvatars = [];
   List<String> _proAvatars = [];
   bool _isLoadingAssets = true;
-  final TextEditingController _nicknameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+
+  // Контролери робимо late, щоб заповнити їх в initState з менеджера
+  late TextEditingController _nicknameController;
+  late TextEditingController _emailController;
+  late TextEditingController _passwordController;
 
   final Map<String, TextEditingController> _platformControllers = {
     'Discord': TextEditingController(),
@@ -51,9 +57,22 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final Map<String, Color> _pColors = {};
   final Map<String, bool> _pValid = {};
 
+  // === 3. ПІДТЯГУЄМО ДАНІ, ЯКЩО КОРИСТУВАЧ ПОВЕРНУВСЯ ===
   @override
   void initState() {
     super.initState();
+
+    // Заповнюємо поля тим, що збережено в менеджері (якщо там пусто — буде просто порожній рядок)
+    _nicknameController = TextEditingController(text: _manager.nickname);
+    _emailController = TextEditingController(text: _manager.email);
+    _passwordController = TextEditingController(text: _manager.password);
+    _selectedAvatarPath = _manager.selectedAvatarPath;
+
+    // Якщо користувач повернувся і поля вже були заповнені — запускаємо валідацію, щоб увімкнути кнопку
+    if (_nicknameController.text.isNotEmpty) _validateNick(_nicknameController.text);
+    if (_emailController.text.isNotEmpty) _validateEmail(_emailController.text);
+    if (_passwordController.text.isNotEmpty) _validatePass(_passwordController.text);
+
     for (var p in _platformControllers.keys) {
       _pMsgs[p] = _getInitialHint(p);
       _pColors[p] = const Color(0xFF6F6F80);
@@ -69,10 +88,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   Future<void> _loadAvatarAssets() async {
     try {
-      // Читаємо маніфест усіх асетів додатка
       final manifest = await AssetManifest.loadFromAssetBundle(DefaultAssetBundle.of(context));
 
-      // Знаходимо всі файли в потрібних папках
       final freePaths = manifest.listAssets().where((path) =>
       path.startsWith('assets/avatars/free/') &&
           (path.endsWith('.webp') || path.endsWith('.jpg'))
@@ -83,7 +100,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           (path.endsWith('.webp') || path.endsWith('.jpg'))
       ).toList();
 
-      // Сортуємо за назвою, щоб avatar_1 був перед avatar_2
       freePaths.sort();
       proPaths.sort();
 
@@ -94,7 +110,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           _isLoadingAssets = false;
         });
 
-        // Фонове кешування, щоб відкривалось миттєво
         for (var path in freePaths) {
           precacheImage(AssetImage(path), context);
         }
@@ -255,8 +270,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     ),
                   ),
                   const SizedBox(height: 15),
-
-                  // РЯДОК З ТАБАМИ ТА ХРЕСТИКОМ
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
@@ -283,8 +296,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       fontFamily: 'Poppins',
                     ),
                   ),
-
-                  // ОСНОВНА ЗОНА З СІТКОЮ ТА НАДПИСОМ
                   Expanded(
                     child: Container(
                       margin: const EdgeInsets.all(20),
@@ -298,7 +309,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0)))
                           : Stack(
                         children: [
-                          // 1. СІТКА АВАТАРОК
                           GridView.builder(
                             physics: const BouncingScrollPhysics(),
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -351,14 +361,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                               );
                             },
                           ),
-
-                          // 2. ЗАФІКСОВАНИЙ НАПИС (Тільки для PRO)
                           if (!_isFreeTab)
                             Positioned(
-                              bottom: 185, // ПІДНЯЛИ ВИЩЕ (було 40), тепер плаває чітко над нижнім рядком
+                              bottom: 185,
                               left: 0,
                               right: 0,
-                              child: IgnorePointer( // Щоб тапи клікали аватарки під написом
+                              child: IgnorePointer(
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   color: Colors.transparent,
@@ -374,9 +382,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                                       children: [
                                         TextSpan(text: 'Unlock with GameBuddy PRO in '),
                                         TextSpan(
-                                          text: 'Settings', // ПІДСВІЧУЄМО САМЕ ЦЕ СЛОВО
+                                          text: 'Settings',
                                           style: TextStyle(
-                                            color: Color(0xFF00F5A0), // Твій фірмовий неоновий зелений
+                                            color: Color(0xFF00F5A0),
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -390,8 +398,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       ),
                     ),
                   ),
-
-                  // КНОПКА ЗБЕРЕЖЕННЯ ЗНИЗУ
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 30),
                     child: NeonGameButton(
@@ -433,63 +439,71 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Перевіряємо, чи відкрита зараз клавіатура
     final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
-    return GestureDetector(
-      onTap: () {
-        setState(() => _activeField = "");
-        FocusScope.of(context).unfocus();
+    // ОНОВЛЕНО: Додаємо PopScope, щоб ловити системні жести "Назад" (свайпи та кнопки телефона)
+    return PopScope(
+      canPop: true, // Дозволяємо вихід з екрана
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          // Що б користувач не натиснув для виходу назад — зберігаємо його тексти в пам'ять
+          _manager.nickname = _nicknameController.text;
+          _manager.email = _emailController.text;
+          _manager.password = _passwordController.text;
+          _manager.selectedAvatarPath = _selectedAvatarPath;
+        }
       },
-      child: Scaffold(
-        backgroundColor: const Color(0xFF0F0F13),
-        // ДОЗВОЛЯЄМО екрану підлаштовуватись під клавіатуру, щоб бачити нижні поля
-        resizeToAvoidBottomInset: true,
-        body: SafeArea(
-          child: Stack(
-            children: [
-              Column(
-                children: [
-                  _buildAppBar('Profile Setup'),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      // Якщо клавіатура закрита — робимо відступ під кнопку, якщо відкрита — мінімальний
-                      padding: EdgeInsets.fromLTRB(33, 0, 33, isKeyboardOpen ? 20 : 120),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 30),
-                          _buildAvatarBlock(),
-                          const SizedBox(height: 40),
-                          _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 145),
-                          const SizedBox(height: 10),
-                          _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 145),
-                          const SizedBox(height: 10),
-                          _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 145, isPass: true),
-                          const SizedBox(height: 30),
-                          const Text('Connected Platforms (optional)', style: TextStyle(fontFamily: 'Poppins', fontSize: 16, color: Colors.white)),
-                          const SizedBox(height: 15),
-                          ..._platformControllers.keys.map((p) => _buildPlatformBlock(p)).toList(),
-                        ],
+      child: GestureDetector(
+        onTap: () {
+          setState(() => _activeField = "");
+          FocusScope.of(context).unfocus();
+        },
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0F0F13),
+          resizeToAvoidBottomInset: true,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    _buildAppBar('Profile Setup'),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: EdgeInsets.fromLTRB(33, 0, 33, isKeyboardOpen ? 20 : 120),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 30),
+                            _buildAvatarBlock(),
+                            const SizedBox(height: 40),
+                            _buildMainField(_nicknameController, 'Enter your nickname', 'nick', _nickMsg, _nickColor, _nickValid, _validateNick, 145),
+                            const SizedBox(height: 10),
+                            _buildMainField(_emailController, 'Enter your email', 'email', _emailMsg, _emailColor, _emailValid, _validateEmail, 145),
+                            const SizedBox(height: 10),
+                            _buildMainField(_passwordController, 'Create a password', 'pass', _passMsg, _passColor, _passValid, _validatePass, 145, isPass: true),
+                            const SizedBox(height: 30),
+                            const Text('Connected Platforms (optional)', style: TextStyle(fontFamily: 'Poppins', fontSize: 16, color: Colors.white)),
+                            const SizedBox(height: 15),
+                            ..._platformControllers.keys.map((p) => _buildPlatformBlock(p)).toList(),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-
-              // Кнопка відображається ТІЛЬКИ тоді, коли клавіатура СХОВАНА
-              if (!isKeyboardOpen)
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 120,
-                  child: Container(
-                    alignment: Alignment.center,
-                    color: const Color(0xFF0F0F13),
-                    child: _buildFinishButton(),
-                  ),
+                  ],
                 ),
-            ],
+                if (!isKeyboardOpen)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 120,
+                    child: Container(
+                      alignment: Alignment.center,
+                      color: const Color(0xFF0F0F13),
+                      child: _buildFinishButton(),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -503,7 +517,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 24),
-            onPressed: () => Navigator.pop(context),
+            // ОНОВЛЕНО ТУТ: При натисканні "Назад" страхуємо поточний текст користувача
+            onPressed: () {
+              _manager.nickname = _nicknameController.text;
+              _manager.email = _emailController.text;
+              _manager.password = _passwordController.text;
+              _manager.selectedAvatarPath = _selectedAvatarPath;
+              Navigator.pop(context);
+            },
           ),
           Expanded(
             child: Text(
@@ -587,7 +608,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           obscureText: isPass ? _obscurePassword : false,
           textAlign: TextAlign.center,
           textAlignVertical: TextAlignVertical.center,
-          cursorColor: const Color(0xFF00F5A0), // Гарний неоновий курсор
+          cursorColor: const Color(0xFF00F5A0),
           style: const TextStyle(color: Colors.white, fontSize: 14),
           decoration: InputDecoration(
             hintText: h,
@@ -595,7 +616,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             contentPadding: EdgeInsets.zero,
             border: InputBorder.none,
             isDense: true,
-            // СТВОРЮЄМО НЕВИДИМУ "ПРОТИВАГУ" ЗЛІВА ДЛЯ ОКА
             prefixIcon: isPass
                 ? const Opacity(opacity: 0, child: Icon(Icons.visibility, size: 20))
                 : null,
@@ -658,13 +678,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       padding: const EdgeInsets.only(bottom: 20),
       child: NeonFinishButton(
         isActive: _isFormReady,
+        // ОНОВЛЕНО ТУТ: Перед фінальним переходом на верифікацію пошти фіксуємо дані в менеджері
         onTap: () {
           if (_isFormReady) {
+            _manager.nickname = _nicknameController.text;
+            _manager.email = _emailController.text;
+            _manager.password = _passwordController.text;
+            _manager.selectedAvatarPath = _selectedAvatarPath;
+
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => EmailVerificationScreen(
-                  email: _emailController.text, // Передаємо введений імейл
+                  email: _emailController.text,
                 ),
               ),
             );
