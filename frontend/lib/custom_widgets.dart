@@ -259,7 +259,7 @@ const String _svgFinishActive = '''<svg width="371" height="100" viewBox="0 0 37
 <rect width="3.21639" height="2.84746" rx="1.42373" transform="matrix(-1 0 0 1 349 22)" fill="#00D7EC"/>
 <rect x="331.846" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 331.846 24.8475)" fill="#00D7EC"/>
 <rect x="38.082" y="31.4916" width="294.836" height="37.9661" rx="12" fill="url(#paint0_linear_70_396)"/>
-<text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle" fill="#0F0F1A" style="font-family: Poppins; font-weight: 800; font-size: 15px;">FINISH SETUP</text>
+<text x="185.5" y="54" dominant-baseline="middle" text-anchor="middle" fill="#0F0F1A" style="font-family: Poppins; font-weight: 800; font-size: 15px; letter-spacing: -0.02em;">Finish Setup</text>
 </g>
 <defs>
 <filter id="filter0_ddi_70_396" x="0" y="0" width="371" height="99.9999" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
@@ -282,14 +282,15 @@ const String _svgFinishActive = '''<svg width="371" height="100" viewBox="0 0 37
 <feGaussianBlur stdDeviation="5"/>
 <feComposite in2="hardAlpha" operator="arithmetic" k2="-1" k3="1"/>
 <feColorMatrix type="matrix" values="0 0 0 0 0.415686 0 0 0 0 0 0 0 0 0 1 0 0 0 0.25 0"/>
-<feBlend mode="normal" in2="effect3_innerShadow_70_396" result="effect3_innerShadow_70_396"/>
+<feBlend mode="normal" in2="shape" result="effect3_innerShadow_70_396"/>
 </filter>
 <linearGradient id="paint0_linear_70_396" x1="38.082" y1="50.4746" x2="332.918" y2="50.4746" gradientUnits="userSpaceOnUse">
 <stop stop-color="#00D1FF"/>
 <stop offset="1" stop-color="#00F5A0"/>
 </linearGradient>
 </defs>
-</svg>''';
+</svg>
+''';
 
 // --- КНОПКА FINISH SETUP (НЕАКТИВНА - ПОВНА ВЕРСІЯ) ---
 const String _svgFinishInactive = '''<svg width="371" height="100" viewBox="0 0 371 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -347,9 +348,10 @@ const String _svgFinishInactive = '''<svg width="371" height="100" viewBox="0 0 
 <rect width="3.21639" height="2.84746" rx="1.42373" transform="matrix(-1 0 0 1 349 22)" fill="#7A7A8C"/>
 <rect x="331.846" y="24.8475" width="3.21639" height="2.84746" rx="1.42373" transform="rotate(180 331.846 24.8475)" fill="#7A7A8C"/>
 <rect x="38.082" y="31.4916" width="294.836" height="37.9661" rx="12" fill="#3A3A4A"/>
-<text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle" fill="#A3A3B5" style="font-family: Poppins; font-weight: 800; font-size: 15px;">FINISH SETUP</text>
+<text x="185.5" y="54" dominant-baseline="middle" text-anchor="middle" fill="#A3A3B5" style="font-family: Poppins; font-weight: 800; font-size: 15px; letter-spacing: -0.02em;">Finish Setup</text>
 </g>
-</svg>''';
+</svg>
+''';
 
 class NeonFinishButton extends StatelessWidget {
   final bool isActive;

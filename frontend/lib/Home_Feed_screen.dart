@@ -129,13 +129,13 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildSearchHeader(),
-                const SizedBox(height: 18),
+                const SizedBox(height: 6),
                 _buildPlayStyleFilter(),
-                const SizedBox(height: 16),
+                const SizedBox(height: 6),
                 _buildPlatformFilter(),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
                 _buildToggleAndRatingSection(),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.symmetric(vertical: 10),
@@ -180,8 +180,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
         ? _confirmedActiveGames.join(' / ')
         : 'What do you want to play now?';
 
+    // Перевірка умови для хрестика (пункт 2): якщо є текст або є підтверджена гра
+    bool showClearButton = _searchController.text.isNotEmpty || _confirmedActiveGames.isNotEmpty;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6), // Ущільнено сам хедер
       child: Row(
         children: [
           Container(
@@ -214,34 +217,43 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _searchController,
+                    // 2) Клікабельність усього вікна активує випадаючий список
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
                       onTap: () {
                         setState(() {
                           _isGameDropdownOpen = true;
                         });
                       },
-                      onChanged: (value) {
-                        setState(() {});
-                      },
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins'),
-                      decoration: InputDecoration(
-                        hintText: placeholderText,
-                        hintStyle: TextStyle(
-                          color: _confirmedActiveGames.isNotEmpty ? Colors.white : const Color(0xFF8E8EA9),
-                          fontSize: 14,
-                          fontFamily: 'Poppins',
-                          fontWeight: FontWeight.w400,
+                      child: TextField(
+                        controller: _searchController,
+                        onTap: () {
+                          setState(() {
+                            _isGameDropdownOpen = true;
+                          });
+                        },
+                        onChanged: (value) {
+                          setState(() {});
+                        },
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins'),
+                        decoration: InputDecoration(
+                          hintText: placeholderText,
+                          hintStyle: TextStyle(
+                            color: _confirmedActiveGames.isNotEmpty ? Colors.white : const Color(0xFF8E8EA9),
+                            fontSize: 14,
+                            fontFamily: 'Poppins',
+                            fontWeight: FontWeight.w400,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
                         ),
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
                       ),
                     ),
                   ),
 
-                  // ВИПРАВЛЕНО (Пункт 4): Хрестик з'являється відразу, коли вводиться текст
-                  if (_searchController.text.isNotEmpty || _confirmedActiveGames.isNotEmpty)
+                  // 2) Логіка хрестика: очищає, але НЕ відкриває список знову
+                  if (showClearButton)
                     GestureDetector(
                       onTap: () {
                         setState(() {
@@ -251,12 +263,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                         });
                       },
                       child: const Padding(
-                        padding: EdgeInsets.only(right: 6),
+                        padding: EdgeInsets.only(right: 6, left: 6),
                         child: Icon(Icons.close, color: Color(0xFF8E8EA9), size: 18),
                       ),
                     ),
 
-                  // ВИПРАВЛЕНО (Пункт 1): Стрілочка стала великою, змінює стан між праворуч та зеленою вниз
+                  // Стрілочка: відкриває/закриває вікно при натисканні
                   GestureDetector(
                     onTap: () {
                       setState(() {
@@ -264,11 +276,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       });
                     },
                     child: RotatedBox(
-                      quarterTurns: _isGameDropdownOpen ? 1 : 0, // Повертає стрілку вниз при відкритті
+                      quarterTurns: _isGameDropdownOpen ? 1 : 0,
                       child: Icon(
                         Icons.play_arrow,
                         color: _isGameDropdownOpen ? const Color(0xFF00F5A0) : Colors.white,
-                        size: 28, // ЗБІЛЬШЕНО РОЗМІР СТРІЛКИ
+                        size: 28,
                       ),
                     ),
                   ),
