@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'notifications_overlay.dart'; // Наш окремий файл сповіщень
+import 'custom_widgets.dart';
 
 // 1. МОДЕЛЬ ДАНИХ ГЕЙМЕРА
 class GamerProfile {
@@ -42,6 +44,10 @@ class HomeFeedScreen extends StatefulWidget {
 }
 
 class _HomeFeedScreenState extends State<HomeFeedScreen> {
+  // Стан для відкриття сповіщень та індикатора
+  bool _isNotificationsOpen = false;
+  bool _hasUnreadNotifications = true;
+
   final List<GamerProfile> _mockGamers = [
     GamerProfile(
       nickname: 'ShadowNinja123',
@@ -103,6 +109,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const accentColor = Color(0xFF00F5A0);
+
     List<GamerProfile> filteredGamers = _mockGamers.where((gamer) {
       if (_confirmedActiveGames.isNotEmpty && !_confirmedActiveGames.contains(gamer.mainGame)) {
         return false;
@@ -128,7 +136,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSearchHeader(),
+                _buildSearchHeader(accentColor),
                 const SizedBox(height: 6),
                 _buildPlayStyleFilter(),
                 const SizedBox(height: 6),
@@ -162,29 +170,39 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                     itemCount: filteredGamers.length,
                     itemBuilder: (context, index) {
-                      return GamerCard(profile: filteredGamers[index]);
+                      return GamerCard(profile: filteredGamers[index], accentColor: accentColor);
                     },
                   ),
                 ),
               ],
             ),
             if (_isGameDropdownOpen) _buildGamesDropdown(),
+
+            // НАКЛАДАННЯ СПОВІЩЕНЬ поверх усього фіду
+            if (_isNotificationsOpen)
+              Positioned(
+                top: 50, // Акуратно під твоїм хейдером
+                left: 24,
+                right: 24,
+                child: NotificationsOverlay(
+                  onClose: () => setState(() => _isNotificationsOpen = false),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSearchHeader() {
+  Widget _buildSearchHeader(Color accentColor) {
     String placeholderText = _confirmedActiveGames.isNotEmpty
         ? _confirmedActiveGames.join(' / ')
         : 'What do you want to play now?';
 
-    // Перевірка умови для хрестика (пункт 2): якщо є текст або є підтверджена гра
     bool showClearButton = _searchController.text.isNotEmpty || _confirmedActiveGames.isNotEmpty;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6), // Ущільнено сам хедер
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
       child: Row(
         children: [
           Container(
@@ -193,10 +211,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF181826),
-              border: Border.all(color: const Color(0xFF00F5A0).withOpacity(0.3), width: 1),
+              border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF00F5A0).withOpacity(0.5),
+                  color: accentColor.withValues(alpha: 0.5),
                   blurRadius: 6,
                   spreadRadius: 1,
                 ),
@@ -217,7 +235,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    // 2) Клікабельність усього вікна активує випадаючий список
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
                       onTap: () {
@@ -251,8 +268,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       ),
                     ),
                   ),
-
-                  // 2) Логіка хрестика: очищає, але НЕ відкриває список знову
                   if (showClearButton)
                     GestureDetector(
                       onTap: () {
@@ -267,8 +282,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                         child: Icon(Icons.close, color: Color(0xFF8E8EA9), size: 18),
                       ),
                     ),
-
-                  // Стрілочка: відкриває/закриває вікно при натисканні
                   GestureDetector(
                     onTap: () {
                       setState(() {
@@ -279,7 +292,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       quarterTurns: _isGameDropdownOpen ? 1 : 0,
                       child: Icon(
                         Icons.play_arrow,
-                        color: _isGameDropdownOpen ? const Color(0xFF00F5A0) : Colors.white,
+                        color: _isGameDropdownOpen ? accentColor : Colors.white,
                         size: 28,
                       ),
                     ),
@@ -289,7 +302,20 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
             ),
           ),
           const SizedBox(width: 4),
-          const Icon(Icons.notifications_none, color: Colors.white, size: 24),
+
+          // === ТОЧКОВА ПРАВКА: Замінено старий дзвоник на новий кастомний SVG-віджет ===
+          NeonNotificationBell(
+            hasUnread: _hasUnreadNotifications,
+            isOpen: _isNotificationsOpen,
+            onTap: () {
+              setState(() {
+                _isNotificationsOpen = !_isNotificationsOpen;
+                if (_isNotificationsOpen) {
+                  _hasUnreadNotifications = false;
+                }
+              });
+            },
+          ),
         ],
       ),
     );
@@ -312,7 +338,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
           border: Border.all(color: const Color(0xFF2B2B3B), width: 1),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF181826).withOpacity(0.25),
+              color: const Color(0xFF181826).withValues(alpha: 0.25),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -395,14 +421,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                             ),
                           ),
                         ),
-                      )
-                  );
+                      ));
                 },
               ),
             ),
             const SizedBox(height: 8),
-
-            // ВИПРАВЛЕНО (Пункт 2 та 3): Текст розбитий на 2 рядки, прибрано переповнення
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -422,7 +445,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                           TextSpan(
                             text: 'Settings',
                             style: TextStyle(
-                              color: Color(0xFF00F5A0), // Тільки слово Settings зелене
+                              color: Color(0xFF00F5A0),
                               fontWeight: FontWeight.w600,
                               decoration: TextDecoration.underline,
                             ),
@@ -447,10 +470,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                     width: 50,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF181826), // Фон завжди темний за специфікацією контуру
+                      color: const Color(0xFF181826),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        // ОНОВЛЕНО: Тільки неоновий контур стає активним
                         color: _temporarilySelectedGames.isNotEmpty
                             ? const Color(0xFF00F5A0)
                             : const Color(0xFF2B2B3B),
@@ -461,7 +483,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       child: Text(
                         'GO',
                         style: TextStyle(
-                          // ОНОВЛЕНО: Текст теж підсвічується зеленим, коли активний
                           color: _temporarilySelectedGames.isNotEmpty
                               ? const Color(0xFF00F5A0)
                               : const Color(0xFF8E8EA9),
@@ -581,7 +602,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                     boxShadow: [
                       if (_voiceChatOn)
                         BoxShadow(
-                          color: const Color(0xFF00F5A0).withOpacity(0.4),
+                          color: const Color(0xFF00F5A0).withValues(alpha: 0.4),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),
@@ -596,7 +617,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                         child: Text(
                           _voiceChatOn ? 'ON' : 'OFF',
                           style: TextStyle(
-                            color: _voiceChatOn ? const Color(0xFF0F0F1A) : const Color(0xFFA3A3B5),
+                            // === ВИПРАВЛЕНО ТУТ ===
+                            // Якщо ON — колір майже чорний (на фоні зелені), якщо OFF — світло-сірий (на темному фоні)
+                            color: _voiceChatOn ? const Color(0xFF0F0F1A) : const Color(0xFF8E8EA9),
                             fontFamily: 'Poppins',
                             fontWeight: FontWeight.w700,
                             fontSize: 9,
@@ -628,15 +651,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
             ],
           ),
           Row(
-            children: [
-              const Text(
+            children: const [
+              Text(
                 'Rating',
                 style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
               ),
-              const SizedBox(width: 6),
-              const Icon(Icons.lock, color: Color(0xFF6F6F80), size: 16),
-              const SizedBox(width: 4),
-              const Text(
+              SizedBox(width: 6),
+              Icon(Icons.lock, color: Color(0xFF6F6F80), size: 16),
+              SizedBox(width: 4),
+              Text(
                 'Unlock in PRO',
                 style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
               ),
@@ -650,8 +673,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
 class GamerCard extends StatelessWidget {
   final GamerProfile profile;
+  final Color accentColor;
 
-  const GamerCard({super.key, required this.profile});
+  // Конструктор приймає accentColor, щоб не було помилок із областю видимості
+  const GamerCard({super.key, required this.profile, required this.accentColor});
 
   @override
   Widget build(BuildContext context) {
@@ -662,7 +687,7 @@ class GamerCard extends StatelessWidget {
         color: const Color(0xFF181826),
         borderRadius: BorderRadius.circular(16),
         border: profile.isPro
-            ? Border.all(color: const Color(0xFF00F5A0).withOpacity(0.2), width: 1.5)
+            ? Border.all(color: accentColor.withValues(alpha: 0.2), width: 1.5)
             : null,
       ),
       child: Column(
@@ -683,21 +708,21 @@ class GamerCard extends StatelessWidget {
                       boxShadow: [
                         if (profile.isOnline)
                           BoxShadow(
-                            color: const Color(0xFF00F5A0).withOpacity(0.25),
+                            color: accentColor.withValues(alpha: 0.25),
                             blurRadius: 5,
                             spreadRadius: 0,
                           )
                         else
                           BoxShadow(
-                            color: const Color(0xFF8E8EA9).withOpacity(0.15),
+                            color: const Color(0xFF8E8EA9).withValues(alpha: 0.15),
                             blurRadius: 4,
                             spreadRadius: 0,
                           ),
                       ],
                       border: Border.all(
                         color: profile.isOnline
-                            ? const Color(0xFF00F5A0).withOpacity(0.8)
-                            : const Color(0xFF8E8EA9).withOpacity(0.4),
+                            ? accentColor.withValues(alpha: 0.8)
+                            : const Color(0xFF8E8EA9).withValues(alpha: 0.4),
                         width: 1.5,
                       ),
                     ),
@@ -709,7 +734,7 @@ class GamerCard extends StatelessWidget {
                           fontSize: 30,
                           fontWeight: FontWeight.w400,
                           height: 27 / 30,
-                          color: profile.isOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9),
+                          color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9),
                         ),
                       ),
                     ),
@@ -732,10 +757,12 @@ class GamerCard extends StatelessWidget {
                         ),
                         if (profile.isPro) ...[
                           const SizedBox(width: 6),
+                          // ТУТ ВИПРАВЛЕНО (325 рядок): прибрано const перед Container,
+                          // оскільки accentColor динамічний
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
-                              gradient: const LinearGradient(colors: [Color(0xFF00F5A0), Color(0xFF0066FF)]),
+                              gradient: LinearGradient(colors: [accentColor, const Color(0xFF0066FF)]),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Text('PRO', style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 10)),
@@ -767,7 +794,7 @@ class GamerCard extends StatelessWidget {
                   Container(
                     width: 8,
                     height: 8,
-                    decoration: BoxDecoration(color: profile.isOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9), shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9), shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 6),
                   Text(profile.isOnline ? 'Online' : 'Offline', style: const TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 11)),
@@ -776,9 +803,9 @@ class GamerCard extends StatelessWidget {
               const SizedBox(width: 16),
               Row(
                 children: [
-                  Icon(profile.hasVoice ? Icons.mic : Icons.mic_off, color: profile.hasVoice ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9), size: 13),
+                  Icon(profile.hasVoice ? Icons.mic : Icons.mic_off, color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), size: 13),
                   const SizedBox(width: 4),
-                  Text('Voice', style: TextStyle(color: profile.hasVoice ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 11)),
+                  Text('Voice', style: TextStyle(color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 11)),
                 ],
               ),
               const SizedBox(width: 16),
@@ -807,8 +834,8 @@ class GamerCard extends StatelessWidget {
                   onTap: () {},
                   child: Container(
                     height: 40,
-                    decoration: BoxDecoration(border: Border.all(color: const Color(0xFF00F5A0), width: 1), borderRadius: BorderRadius.circular(12)),
-                    child: const Center(child: Text('View profile', style: TextStyle(color: Color(0xFF00F5A0), fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14))),
+                    decoration: BoxDecoration(border: Border.all(color: accentColor, width: 1), borderRadius: BorderRadius.circular(12)),
+                    child: Center(child: Text('View profile', style: TextStyle(color: accentColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14))),
                   ),
                 ),
               ),
@@ -818,7 +845,7 @@ class GamerCard extends StatelessWidget {
                   onTap: () {},
                   child: Container(
                     height: 40,
-                    decoration: BoxDecoration(color: const Color(0xFF00F5A0), borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: accentColor, borderRadius: BorderRadius.circular(12)),
                     child: const Center(child: Text('Invite to play', style: TextStyle(color: Color(0xFF0F0F1A), fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 14))),
                   ),
                 ),

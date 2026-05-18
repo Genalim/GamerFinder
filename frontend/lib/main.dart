@@ -1,8 +1,18 @@
 import 'Welcome_screen.dart';
 import 'package:flutter/material.dart';
 import 'profile_setup_screen.dart';
+import 'package:flutter/services.dart';
 
-void main() {
+void main() async {
+  // Забезпечуємо ініціалізацію зв'язку з платформою перед викликом SystemChrome
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Фіксуємо орієнтацію додатку суто у вертикальному положенні (Portrait)
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
   runApp(const MyApp());
 }
 

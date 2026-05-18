@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'Home_Feed_screen.dart';
+import 'main_navigation.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final String email;
@@ -296,7 +297,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                             onTap: () {
                               Navigator.pushReplacement(
                                 context,
-                                MaterialPageRoute(builder: (context) => const HomeFeedScreen()),
+                                MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
                               );
                             },
                             child: Container(
