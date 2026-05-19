@@ -406,9 +406,9 @@ class NeonNotificationBell extends StatelessWidget {
 
     // 2 КЕЙС: Дзвоник із твоєю рідною зеленою крапкою (крапка завжди #00F5A0)
     final String bellActiveSvg = '''
-<svg width="18" height="24" viewBox="0 0 18 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M6 21H12C12 21 12.15 24 9 24C5.85 24 6 21 6 21ZM16.05 17.1C15.3 16.8 15 16.05 15 15.3V7.5C15 7.5 14.7 3.9 10.5 3.15V1.5C10.5 1.5 10.65 0 9 0C7.35 0 7.5 1.5 7.5 1.5V3.15C3.3 3.9 3 7.5 3 7.5V15.3C3 16.05 2.55 16.8 1.95 17.1L0 18V19.5H18V18L16.05 17.1ZM6 7.2V18H3C4.2 18 4.5 16.5 4.5 16.5V7.5C4.5 7.5 4.5 6.3 5.55 5.4C6.6 4.35 7.5 4.5 7.5 4.5C7.5 4.5 6 5.55 6 7.2Z" fill="$bellColor"/>
-<circle cx="14" cy="5" r="3" fill="#00F5A0"/>
+<circle cx="20.2" cy="3.5" r="3.2" fill="#00F5A0"/>
 </svg>
 ''';
 
@@ -564,8 +564,13 @@ class FigmaArrowIcon extends StatelessWidget {
 /// === КАСТОМНА ЗІРОЧКА РЕЙТИНГУ (З FIGMA SVG) ===
 class FigmaRatingStar extends StatelessWidget {
   final bool isFilled; // true — жовта, false — пуста
+  final double? size;  // Кастомний розмір для хедера (опціонально)
 
-  const FigmaRatingStar({super.key, required this.isFilled});
+  const FigmaRatingStar({
+    super.key,
+    required this.isFilled,
+    this.size,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -585,14 +590,87 @@ class FigmaRatingStar extends StatelessWidget {
 </svg>
 ''';
 
+    // Якщо size передано, вираховуємо ширину та висоту пропорційно
+    final double finalWidth = size ?? (isFilled ? 20 : 21);
+    final double finalHeight = size ?? (isFilled ? 19 : 20);
+
     return SvgPicture.string(
       isFilled ? filledStarSvg : emptyStarSvg,
-      width: isFilled ? 20 : 21,
-      height: isFilled ? 19 : 20,
+      width: finalWidth,
+      height: finalHeight,
     );
   }
 }
 
+/// === Чекбокси у сповіщеннях ===
+class FigmaArchiveCheckbox extends StatelessWidget {
+  final bool isChecked;
+
+  const FigmaArchiveCheckbox({
+    super.key,
+    required this.isChecked,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Твій SVG код із Figma (розмір 21x21)
+    const String svgString = '''
+<svg width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M19.698 6.45C19.75 7.5 19.75 8.75 19.75 10.25C19.75 14.728 19.75 16.968 18.359 18.359C16.968 19.75 14.729 19.75 10.25 19.75C5.772 19.75 3.532 19.75 2.141 18.359C0.75 16.968 0.75 14.729 0.75 10.25C0.75 5.772 0.75 3.532 2.141 2.141C3.532 0.75 5.771 0.75 10.25 0.75C11.322 0.75 12.266 0.75 13.1 0.77" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
+''';
+
+    return SizedBox(
+      width: 20,
+      height: 20,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none, // Дозволяє галочці красиво виходити за межі рамки
+        children: [
+          // Базова рамка (твій кастомний SVG)
+          SvgPicture.string(
+            svgString,
+            width: 20,
+            height: 20,
+          ),
+
+          // Якщо активовано — малюємо галочку поверх розриву
+          if (isChecked)
+            Positioned(
+              top: -3,   // Зміщуємо трохи вгору, щоб вона сіла точно в розрив кута
+              right: -3, // Зміщуємо праворуч, як у Figma
+              child: Icon(
+                Icons.done_rounded,
+                size: 16,
+                color: const Color(0xFF00F5A0).withOpacity(0.9),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class FigmaInboxClearedIcon extends StatelessWidget {
+  const FigmaInboxClearedIcon({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Твій SVG з рамкою та стрілочкою з Figma (розмір 24x24)
+    const String svgString = '''
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M21.448 8.2C21.5 9.25 21.5 10.5 21.5 12C21.5 16.478 21.5 18.718 20.109 20.109C18.718 21.5 16.479 21.5 12 21.5C7.522 21.5 5.282 21.5 3.891 20.109C2.5 18.718 2.5 16.479 2.5 12C2.5 7.522 2.5 5.282 3.891 3.891C5.282 2.5 7.521 2.5 12 2.5C13.072 2.5 14.016 2.5 14.85 2.52" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M8 11.5C8 11.5 9.5 11.5 11.5 15C11.5 15 16.559 5.833 21.5 4" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+''';
+
+    return SvgPicture.string(
+      svgString,
+      width: 24,
+      height: 24,
+    );
+  }
+}
 // =============================================================================
 // ПОРАДА: Сюди можна додавати інші кастомні віджети (текстові поля, картки тощо)
 // просто створюючи нові класи нижче.
