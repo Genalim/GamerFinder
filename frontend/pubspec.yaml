@@ -64,6 +64,7 @@ flutter:
     - assets/images/PlayStyles/
     - assets/avatars/free/
     - assets/avatars/pro/
+    - assets/ChatBackground/
 
   #Fonts connect
   fonts:
