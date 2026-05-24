@@ -22,40 +22,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F0F13),
-      // ВАЖЛИВО: вимикаємо автоматичне зміщення, щоб уникнути багів з відступами
-      resizeToAvoidBottomInset: false,
-      body: Stack(
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+
+    return Material(
+      color: const Color(0xFF0F0F13),
+      child: Column(
         children: [
-          // Фон
-          Container(
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/ChatBackground/$_currentBg'),
-                fit: BoxFit.cover,
-                opacity: 0.3,
+          _buildHeader(),
+          Expanded(
+            child: Container(
+              // Фон тут, щоб не було чорних ліній
+              decoration: BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage('assets/ChatBackground/$_currentBg'),
+                  fit: BoxFit.cover,
+                  opacity: 0.3,
+                ),
+              ),
+              child: const Center(
+                child: Text("No messages yet", style: TextStyle(color: Color(0xFF8E8EA9))),
               ),
             ),
           ),
-
-          // Використовуємо AnimatedPadding, щоб плавно підняти ВСЕ на висоту клавіатури
-          AnimatedPadding(
-            duration: const Duration(milliseconds: 100),
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-            child: Column(
-              children: [
-                _buildHeader(),
-                Expanded(
-                  child: Container(
-                    child: const Center(
-                      child: Text("No messages yet", style: TextStyle(color: Color(0xFF8E8EA9))),
-                    ),
-                  ),
-                ),
-                _buildInput(),
-              ],
+          // ВАЖЛИВО: піднімаємо бокс тільки на висоту клавіатури
+          // Прибираємо будь-які додаткові SizedBox
+          Padding(
+            padding: EdgeInsets.only(
+              // Додаємо + 10 (або інше число), щоб був зазор
+              // Якщо клавіатура відкрита (keyboardHeight > 0), ми додаємо 10 до висоти клавіатури
+              // Якщо закрита, ми додаємо 10 до системного відступу знизу
+              bottom: keyboardHeight > 0
+                  ? (keyboardHeight + 10)
+                  : (MediaQuery.of(context).padding.bottom + 20),
+              left: 16,  // Додаємо відступи з боків, щоб збігалося з margin в _buildInput
+              right: 16,
             ),
+            child: _buildInput(),
           ),
         ],
       ),
@@ -123,7 +125,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Widget _buildInput() {
     return Container(
       // Використовуємо margin для відступів від країв екрана
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      margin: EdgeInsets.zero,
       height: 47,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -140,6 +142,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               textAlignVertical: TextAlignVertical.center,
               style: TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
+                contentPadding: EdgeInsets.zero,
                 isCollapsed: true, // ВАЖЛИВО: прибирає зайві відступи
                 hintText: "Write your message",
                 hintStyle: TextStyle(color: Color(0xFF8E8EA9), fontSize: 14),

@@ -28,7 +28,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       // 1. Це не дасть всьому екрану підійматися при появі клавіатури
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF0F0F13),
 
       // 2. Використовуємо body для контенту
