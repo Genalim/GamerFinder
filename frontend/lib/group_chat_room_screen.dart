@@ -1,26 +1,22 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'custom_widgets.dart';
-import 'chat_add_friend_group_screen.dart';
-import 'models.dart';
 
-class ChatRoomScreen extends StatefulWidget {
-  final String friendName;
+class GroupChatRoomScreen extends StatefulWidget {
+  final List<String> participantNames;
   final VoidCallback onBack;
-  final List<FriendItem> allFriends;
 
-  const ChatRoomScreen({
+  const GroupChatRoomScreen({
     super.key,
-    required this.friendName,
+    required this.participantNames,
     required this.onBack,
-    required this.allFriends,
   });
 
   @override
-  State<ChatRoomScreen> createState() => _ChatRoomScreenState();
+  State<GroupChatRoomScreen> createState() => _GroupChatRoomScreenState();
 }
 
-class _ChatRoomScreenState extends State<ChatRoomScreen> {
+class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> {
   final List<String> _backgrounds = ['1.webp', '2.webp', '3.webp'];
   late String _currentBg;
   final TextEditingController _textController = TextEditingController();
@@ -44,11 +40,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Знаходимо поточного друга для отримання даних аватара та статусу
-    final friend = widget.allFriends.firstWhere(
-          (f) => f.name == widget.friendName,
-      orElse: () => FriendItem(name: widget.friendName, status: 'offline', initial: widget.friendName[0]),
-    );
+    // Назва: Ім'я (перший юзер) + кількість інших
+    final String displayName = "${widget.participantNames.first} +${widget.participantNames.length - 1}";
 
     return Material(
       color: const Color(0xFF0F0F13),
@@ -60,7 +53,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             resizeToAvoidBottomInset: false,
             body: Column(
               children: [
-                _buildHeader(friend),
+                _buildHeader(displayName),
                 const Expanded(child: Center(child: Text("No messages yet", style: TextStyle(color: Color(0xFF8E8EA9))))),
                 Padding(
                   padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, left: 16, right: 16),
@@ -74,47 +67,56 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  Widget _buildHeader(FriendItem friend) {
+  Widget _buildHeader(String displayName) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 57, 12, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // Кнопка назад
           GestureDetector(onTap: widget.onBack, child: const SizedBox(width: 40, height: 40, child: ChatBackIcon(size: 24))),
-          Row(
-            children: [
-              // Аватарка
-              Container(
-                width: 32, height: 32,
-                decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
-                child: Center(child: Text(friend.initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 18, color: Color(0xFF00F5A0)))),
-              ),
-              const SizedBox(width: 8),
-              // Ім'я та статус
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(friend.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  Text(friend.isOnline ? "online" : "offline", style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 10)),
-                ],
-              ),
-            ],
+
+          // Аватар та назва по центру
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildGroupAvatar(),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(displayName, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                    const Text("online", style: TextStyle(color: Color(0xFF00F5A0), fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
           ),
+
+          // Іконка інформації справа
           GestureDetector(
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => ChatAddFriendsGroupScreen(
-                    onClose: () => Navigator.of(context).pop(),
-                    currentFriendName: widget.friendName,
-                    friendsList: widget.allFriends,
-                  ),
-                ),
-              );
+              print("Відкриття інфо групи");
             },
-            child: const ChatAddGroupIcon(size: 42),
+            // Ми прибираємо SizedBox з Icon і вставляємо ваш новий віджет
+            child: const FigmaGroupInfoIcon(size: 45),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGroupAvatar() {
+    final initials = widget.participantNames.map((n) => n[0].toUpperCase()).take(4).toList();
+    return Container(
+      width: 36, height: 36,
+      decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
+      child: Center(
+        child: Wrap(
+          spacing: 2, runSpacing: 2,
+          children: initials.map((i) => Text(i, style: const TextStyle(fontFamily: 'Love Light', fontSize: 12, color: Color(0xFF00F5A0)))).toList(),
+        ),
       ),
     );
   }

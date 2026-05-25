@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'custom_widgets.dart' show FigmaNewChatIcon, ChatsHeaderCheckbox, FigmaRatingStar;
 import 'chat_new_screen.dart';
 import 'new_chat_room_screen.dart';
+import 'models.dart'; // Імпортуємо ваші моделі
 
 class ChatItem {
   final String title;
@@ -11,7 +12,7 @@ class ChatItem {
   final bool isPro;
   final bool isGroupChat;
   final List<String> userInitials;
-  final String status; // 'sent', 'delivered', 'read', 'unread'
+  final String status;
 
   ChatItem({
     required this.title,
@@ -21,10 +22,9 @@ class ChatItem {
     this.isPro = false,
     this.isGroupChat = false,
     required this.userInitials,
-    required this.status, // ДОДАЙТЕ ЦЕ
+    required this.status,
   });
 }
-
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -52,6 +52,15 @@ class ChatListWidget extends StatefulWidget {
 
 class _ChatListWidgetState extends State<ChatListWidget> {
   String _searchQuery = "";
+
+  // Додаємо цей список, щоб передавати його в ChatRoomScreen
+  final List<FriendItem> _allFriends = [
+    FriendItem(name: 'ALEX', status: 'online', initial: 'A', isOnline: true),
+    FriendItem(name: 'NOVA', status: 'was online 1 hour ago', initial: 'N', isOnline: false),
+    FriendItem(name: 'Peter', status: 'was online a year ago', initial: 'P', isOnline: false),
+    FriendItem(name: 'MMA_boxer', status: 'was online yesterday at 10:05 PM', initial: 'M', isOnline: false),
+  ];
+
   final List<ChatItem> _chats = [
     ChatItem(title: 'Mario_gamer', lastMessage: 'Last message', time: '5min ago', unreadCount: 2, isPro: true, userInitials: ['M'], status: 'unread'),
     ChatItem(title: 'Sam', lastMessage: 'Last message', time: '5min agi', unreadCount: 12, isPro: false, userInitials: ['S'], status: 'unread'),
@@ -107,29 +116,18 @@ class _ChatListWidgetState extends State<ChatListWidget> {
                 height: 40,
                 decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(10)),
                 child: TextField(
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value.toLowerCase();
-                    });
-                  },
+                  onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
                   textAlign: TextAlign.center,
-                  textAlignVertical: TextAlignVertical.center, // Залишаємо це
-                  style: const TextStyle(color: Colors.white, fontSize: 14), // Додаємо фіксований розмір шрифту
-                  decoration: InputDecoration(
-                    // Іконка пошуку
-                    prefixIcon: const SizedBox(
-                        width: 40,
-                        child: Icon(Icons.search, color: Color(0xFF00F5A0), size: 20)
-                    ),
-                    // Іконка справа (пуста для балансу)
-                    suffixIcon: const SizedBox(width: 40),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: const InputDecoration(
+                    prefixIcon: SizedBox(width: 40, child: Icon(Icons.search, color: Color(0xFF00F5A0), size: 20)),
+                    suffixIcon: SizedBox(width: 40),
                     hintText: 'Search players or chats',
-                    hintStyle: const TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
+                    hintStyle: TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
                     border: InputBorder.none,
-
-                    // ВАЖЛИВО: Використовуємо isCollapsed або налаштовуємо isDense
                     isCollapsed: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 9), // Регулюйте це значення (10-15)
+                    contentPadding: EdgeInsets.symmetric(vertical: 9),
                   ),
                 ),
               ),
@@ -137,10 +135,10 @@ class _ChatListWidgetState extends State<ChatListWidget> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.only(top: 10),
-                itemCount: filteredChats.length, // <--- Використовуємо довжину фільтрованого списку
+                itemCount: filteredChats.length,
                 itemBuilder: (context, index) => GestureDetector(
-                  onTap: () => _openChat(filteredChats[index].title),
-                  child: _buildChatTile(filteredChats[index]) // <--- Передаємо відфільтрований елемент
+                    onTap: () => _openChat(filteredChats[index].title),
+                    child: _buildChatTile(filteredChats[index])
                 ),
               ),
             ),
@@ -150,28 +148,33 @@ class _ChatListWidgetState extends State<ChatListWidget> {
     );
   }
 
-  Widget _buildChatTile(ChatItem chat) {
-    final backgroundColor = chat.unreadCount > 0
-        ? const Color(0xFF232336)
-        : const Color(0xFF181826);
+  // ВИПРАВЛЕНИЙ МЕТОД: тепер передаємо allFriends
+  void _openChat(String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatRoomScreen(
+          friendName: name,
+          onBack: () => Navigator.pop(context),
+          allFriends: _allFriends, // Передаємо список друзів
+        ),
+      ),
+    );
+  }
 
+  Widget _buildChatTile(ChatItem chat) {
+    // (Решта коду _buildChatTile, _buildStatusIcon, _buildSingleAvatar, _buildGroupAvatar залишається без змін)
+    final backgroundColor = chat.unreadCount > 0 ? const Color(0xFF232336) : const Color(0xFF181826);
     return Container(
       height: 66,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: BoxDecoration(color: backgroundColor, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          // ВІДНОВЛЕНО: Логіка вибору аватара
           SizedBox(
-            width: 40,
-            height: 40,
-            child: (chat.isGroupChat)
-                ? _buildGroupAvatar(chat.userInitials)
-                : _buildSingleAvatar(chat.userInitials.first),
+            width: 40, height: 40,
+            child: (chat.isGroupChat) ? _buildGroupAvatar(chat.userInitials) : _buildSingleAvatar(chat.userInitials.first),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -179,7 +182,6 @@ class _ChatListWidgetState extends State<ChatListWidget> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ВІДНОВЛЕНО: Рядок з іменем та зірочкою PRO
                 Row(children: [
                   Text(chat.title, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
                   if (chat.isPro) ...[
@@ -190,13 +192,10 @@ class _ChatListWidgetState extends State<ChatListWidget> {
                   ],
                 ]),
                 const SizedBox(height: 4),
-                Text(chat.lastMessage,
-                    style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 11),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(chat.lastMessage, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
-          // ПРАВА ЧАСТИНА: Пташки або Unread Count
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -217,15 +216,13 @@ class _ChatListWidgetState extends State<ChatListWidget> {
     );
   }
 
-  // Допоміжний метод для іконок статусу
   Widget _buildStatusIcon(String status) {
     IconData icon;
-    Color color = const Color(0xFF8E8EA9); // Колір пташки з вашого CSS
-
+    Color color = const Color(0xFF8E8EA9);
     switch (status) {
       case 'sent': icon = Icons.check; break;
       case 'delivered': icon = Icons.done_all; break;
-      case 'read': icon = Icons.done_all; color = const Color(0xFF00F5A0); break; // Зелений для прочитаного
+      case 'read': icon = Icons.done_all; color = const Color(0xFF00F5A0); break;
       default: icon = Icons.check;
     }
     return Icon(icon, size: 16, color: color);
@@ -247,6 +244,4 @@ class _ChatListWidgetState extends State<ChatListWidget> {
       )).toList(),
     );
   }
-
-  void _openChat(String name) => Navigator.push(context, MaterialPageRoute(builder: (context) => ChatRoomScreen(friendName: name, onBack: () => Navigator.pop(context))));
 }
