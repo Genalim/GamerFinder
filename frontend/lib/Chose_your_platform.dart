@@ -18,8 +18,8 @@ class _ChoosePlatformScreenState extends State<ChoosePlatformScreen> {
 
   // Оновлюємо список: додаємо точне ім'я файлу для кожної платформи
   final List<Map<String, String>> _platforms = [
-    {'name': 'Personal computer', 'file': 'Personal_computer.png'},
-    {'name': 'PlayStation', 'file': 'Play_station.png'},
+    {'name': 'PC', 'file': 'Personal_computer.png'},
+    {'name': 'PS', 'file': 'Play_station.png'},
     {'name': 'Mobile', 'file': 'Mobile.png'},
     {'name': 'Switch', 'file': 'Switch.png'},
     {'name': 'Xbox', 'file': 'Xbox.png'},

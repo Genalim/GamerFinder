@@ -1,0 +1,119 @@
+[
+  {
+    "nickname": "fffffff",
+    "email": "ffff@fff.bn",
+    "password": "13333",
+    "avatar": "assets/avatars/free/avatar_free_1.jpg",
+    "games": ["Apex Legends"],
+    "platforms": ["PS", "Switch"],
+    "play_styles": ["Competitive", "Training"],
+    "times": ["Afternoon", "Late night"],
+    "voice_chat": false,
+    "languages": ["ES", "FR"],
+    "connected_accounts": {"Discord": "qwert#1234"},
+    "is_online": true,
+    "is_pro": true
+  },
+  {
+    "nickname": "Gena",
+    "email": "gena@gmail.com",
+    "password": "13334",
+    "avatar": "assets/avatars/free/avatar_free_11.jpg",
+    "games": ["Valorant", "League of Legends", "FIFA 21"],
+    "platforms": ["PC", "Xbox", "Mobile", "Switch", "PS"],
+    "play_styles": ["Casual", "Co-op", "Training", "Competitive"],
+    "times": ["Afternoon", "Late night", "Evening", "Morning"],
+    "voice_chat": true,
+    "languages": ["EN", "IT", "UK", "ES"],
+    "connected_accounts": {
+      "Discord": "qweras#1235",
+      "TeamSpeak": "qee",
+      "Mumble": "fffff",
+      "Guilded": "user#124",
+      "Steam chat": "eeee"
+    },
+    "is_online": true,
+    "is_pro": false
+  },
+  {
+    "nickname": "redme",
+    "email": "redme@red.ro",
+    "password": "qwerty",
+    "avatar": null,
+    "games": ["Apex Legends", "Valorant"],
+    "platforms": ["Xbox"],
+    "play_styles": ["Casual", "Training"],
+    "times": ["Evening"],
+    "voice_chat": true,
+    "languages": ["UK", "EN"],
+    "connected_accounts": {},
+    "is_online": true,
+    "is_pro": false
+  },
+  {
+    "nickname": "gggg",
+    "email": "gggg@gggg.com",
+    "password": "pass",
+    "avatar": "assets/avatars/free/avatar_free_17.jpg",
+    "games": ["Fin Lapin 3", "To and Fro"],
+    "platforms": ["Xbox", "PC", "PS"],
+    "play_styles": ["Training", "Co-op"],
+    "times": ["Evening"],
+    "voice_chat": false,
+    "languages": ["UK", "EN", "ES", "BN"],
+    "connected_accounts": {
+      "TeamSpeak": "popwe",
+      "Mumble": "fffff",
+      "Steam chat": "ghds"
+    },
+    "is_online": false,
+    "is_pro": false
+  },
+  {
+    "nickname": "gggggg",
+    "email": "fffff@rttrr.bb",
+    "password": "vggggggg",
+    "avatar": null,
+    "games": ["CS:GO"],
+    "platforms": ["Switch"],
+    "play_styles": ["Training"],
+    "times": ["Late night"],
+    "voice_chat": true,
+    "languages": ["UK"],
+    "connected_accounts": {},
+    "is_online": true,
+    "is_pro": false
+  },
+  {
+    "nickname": "chuck",
+    "email": "chuck@norris.ua",
+    "password": "qwertyuiop",
+    "avatar": "assets/avatars/free/avatar_free_10.jpg",
+    "games": ["Valorant", "League of Legends", "CS:GO", "Apex Legends"],
+    "platforms": ["PC", "Xbox"],
+    "play_styles": ["Casual"],
+    "times": ["Late night"],
+    "voice_chat": true,
+    "languages": ["UK", "ZH"],
+    "connected_accounts": {},
+    "is_online": true,
+    "is_pro": false
+  },
+  {
+    "nickname": "Jack",
+    "email": "asdfg@asd.re",
+    "password": "erwqtyuiop",
+    "avatar": null,
+    "games": ["Valorant"],
+    "platforms": ["Switch"],
+    "play_styles": ["Co-op"],
+    "times": ["Evening"],
+    "voice_chat": false,
+    "languages": ["PL", "UK"],
+    "connected_accounts": {
+      "TeamSpeak": "fdddfff"
+    },
+    "is_online": true,
+    "is_pro": false
+  }
+]

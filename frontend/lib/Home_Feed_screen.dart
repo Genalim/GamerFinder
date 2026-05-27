@@ -1,9 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'notifications_overlay.dart'; // Наш окремий файл сповіщень
+import 'package:flutter/services.dart';
+import 'notifications_overlay.dart';
 import 'custom_widgets.dart';
 import 'gamer_profile_screen.dart';
 
-// 1. МОДЕЛЬ ДАНИХ ГЕЙМЕРА
 class GamerProfile {
   final String nickname;
   final bool isPro;
@@ -16,8 +17,9 @@ class GamerProfile {
   final bool isOnline;
   final List<String> gamesList;
   final List<String> platformsList;
-  final Map<String, String> connectedPlatforms; // Напр: {'Discord': 'Player#1234'}
-  final String playTime; // Напр: "Evening • Late night"
+  final Map<String, String> connectedPlatforms;
+  final String playTime;
+  final String password;
 
   GamerProfile({
     required this.nickname,
@@ -29,22 +31,53 @@ class GamerProfile {
     required this.languages,
     required this.hasVoice,
     required this.isOnline,
-    this.gamesList = const ['Valorant', 'CS2', 'Fortnite', 'Apex'],
-    this.platformsList = const ['PS', 'Mobile', 'PC', 'Xbox'],
-    this.connectedPlatforms = const {'Discord': 'Shadow#1234', 'Steam': 'Ninja_Go'},
-    this.playTime = 'Evening • Late night',
+    required this.gamesList,
+    required this.platformsList,
+    required this.connectedPlatforms,
+    required this.playTime,
+    required this.password,
   });
+
+  factory GamerProfile.fromJson(Map<String, dynamic> json) {
+    List<String> games = List<String>.from(json['games'] ?? []);
+    return GamerProfile(
+      nickname: json['nickname'] ?? 'Unknown',
+      isPro: json['is_pro'] ?? false,
+      mainGame: games.isNotEmpty ? games[0] : 'None',
+      platform: (json['platforms'] as List).isNotEmpty ? json['platforms'][0] : 'None',
+      chatType: json['connected_accounts'] != null && (json['connected_accounts'] as Map).isNotEmpty
+          ? (json['connected_accounts'] as Map).keys.first
+          : 'None',
+      tags: List<String>.from(json['play_styles'] ?? []),
+      languages: List<String>.from(json['languages'] ?? []),
+      hasVoice: json['voice_chat'] ?? false,
+      isOnline: json['is_online'] ?? false,
+      gamesList: games,
+      platformsList: List<String>.from(json['platforms'] ?? []),
+      connectedPlatforms: Map<String, String>.from(json['connected_accounts'] ?? {}),
+      playTime: (json['times'] as List).join(' • '),
+      password: json['password'] ?? '',
+    );
+  }
+
+  String getBestMatchingGame(List<String> myGames) {
+    var common = gamesList.where((g) => myGames.contains(g)).toList();
+    return common.isNotEmpty ? common[0] : (gamesList.isNotEmpty ? gamesList[0] : 'None');
+  }
+
+  int getExtraMatchesCount(List<String> myGames) {
+    var common = gamesList.where((g) => myGames.contains(g)).toList();
+    return common.length > 1 ? common.length - 1 : 0;
+  }
 }
 
 class GameItem {
   final String name;
   final String imagePath;
   final String genre;
-
   GameItem({required this.name, required this.imagePath, required this.genre});
 }
 
-// 2. ГОЛОВНИЙ ЕКРАН HOME FEED
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
 
@@ -53,45 +86,27 @@ class HomeFeedScreen extends StatefulWidget {
 }
 
 class _HomeFeedScreenState extends State<HomeFeedScreen> {
-  // Стан для відкриття сповіщень та індикатора
   bool _isNotificationsOpen = false;
   bool _hasUnreadNotifications = true;
+  List<GamerProfile> _loadedGamers = [];
 
-  final List<GamerProfile> _mockGamers = [
-    GamerProfile(
-      nickname: 'ShadowNinja123',
-      isPro: true,
-      mainGame: 'Valorant',
-      platform: 'PC',
-      chatType: 'Discord (+2)',
-      tags: ['Co-op', 'Competitive', 'Casual', 'Training'],
-      languages: ['English', 'German'],
-      hasVoice: true,
-      isOnline: true,
-    ),
-    GamerProfile(
-      nickname: 'MMA_boxer',
-      isPro: true,
-      mainGame: 'Dota 2',
-      platform: 'Xbox',
-      chatType: 'Steam chat',
-      tags: ['Co-op', 'Casual', 'Training'],
-      languages: ['English'],
-      hasVoice: false,
-      isOnline: true,
-    ),
-    GamerProfile(
-      nickname: 'Mario_gamer',
-      isPro: false,
-      mainGame: 'Apex Legends',
-      platform: 'PC',
-      chatType: '',
-      tags: ['Competitive', 'Casual'],
-      languages: ['German'],
-      hasVoice: false,
-      isOnline: false,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadGamers();
+  }
+
+  Future<void> _loadGamers() async {
+    try {
+      final String response = await rootBundle.loadString('assets/users.json');
+      final List<dynamic> data = json.decode(response);
+      setState(() {
+        _loadedGamers = data.map((json) => GamerProfile.fromJson(json)).toList();
+      });
+    } catch (e) {
+      debugPrint("Error loading JSON: $e");
+    }
+  }
 
   final List<GameItem> _userSavedGames = [
     GameItem(name: 'Valorant', imagePath: 'assets/games/valorant.png', genre: 'FPS/Shooters'),
@@ -120,8 +135,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   Widget build(BuildContext context) {
     const accentColor = Color(0xFF00F5A0);
 
-    List<GamerProfile> filteredGamers = _mockGamers.where((gamer) {
-      if (_confirmedActiveGames.isNotEmpty && !_confirmedActiveGames.contains(gamer.mainGame)) {
+    List<GamerProfile> filteredGamers = _loadedGamers.where((gamer) {
+      if (_confirmedActiveGames.isNotEmpty && !gamer.gamesList.any((g) => _confirmedActiveGames.contains(g))) {
         return false;
       }
       if (_selectedPlayStyles.isNotEmpty) {
@@ -168,29 +183,24 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                   ),
                 ),
                 Expanded(
-                  child: filteredGamers.isEmpty
+                  child: _loadedGamers.isEmpty
                       ? const Center(
-                    child: Text(
-                      'No matches found for active filters.',
-                      style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 14),
-                    ),
+                    child: CircularProgressIndicator(color: accentColor),
                   )
                       : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                     itemCount: filteredGamers.length,
                     itemBuilder: (context, index) {
-                      return GamerCard(profile: filteredGamers[index], accentColor: accentColor);
+                      return GamerCard(profile: filteredGamers[index], accentColor: accentColor, activeGames: _confirmedActiveGames);
                     },
                   ),
                 ),
               ],
             ),
             if (_isGameDropdownOpen) _buildGamesDropdown(),
-
-            // НАКЛАДАННЯ СПОВІЩЕНЬ поверх усього фіду
             if (_isNotificationsOpen)
               Positioned(
-                top: 50, // Акуратно під твоїм хейдером
+                top: 50,
                 left: 24,
                 right: 24,
                 child: NotificationsOverlay(
@@ -311,8 +321,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
             ),
           ),
           const SizedBox(width: 4),
-
-          // === ТОЧКОВА ПРАВКА: Замінено старий дзвоник на новий кастомний SVG-віджет ===
           NeonNotificationBell(
             hasUnread: _hasUnreadNotifications,
             isOpen: _isNotificationsOpen,
@@ -450,8 +458,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       text: const TextSpan(
                         style: TextStyle(color: Colors.white60, fontSize: 11, fontFamily: 'Inter', height: 1.3),
                         children: [
-                          TextSpan(text: 'Don’t see your game here?\nManage your games in '),
-                          TextSpan(
+                          TextSpan(text: 'Don’t see your game here? Manage your games in '),
+                            TextSpan(
                             text: 'Settings',
                             style: TextStyle(
                               color: Color(0xFF00F5A0),
@@ -601,54 +609,44 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               const SizedBox(width: 12),
               GestureDetector(
                 onTap: () => setState(() => _voiceChatOn = !_voiceChatOn),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
+                child: Container(
                   width: 60,
                   height: 25,
                   decoration: BoxDecoration(
-                    color: _voiceChatOn ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
+                    color: const Color(0xFF2B2B3B), // Статичний темний фон
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      if (_voiceChatOn)
-                        BoxShadow(
-                          color: const Color(0xFF00F5A0).withValues(alpha: 0.4),
-                          blurRadius: 8,
-                          spreadRadius: 1,
-                        ),
-                    ],
                   ),
                   child: Stack(
                     children: [
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 200),
-                        left: _voiceChatOn ? 10 : 34,
-                        top: 6,
+                      // Текст ON/OFF (статичний, під бігунком)
+                      Positioned(
+                        left: _voiceChatOn ? 8 : 37,
+                        top: 8,
                         child: Text(
                           _voiceChatOn ? 'ON' : 'OFF',
-                          style: TextStyle(
-                            // === ВИПРАВЛЕНО ТУТ ===
-                            // Якщо ON — колір майже чорний (на фоні зелені), якщо OFF — світло-сірий (на темному фоні)
-                            color: _voiceChatOn ? const Color(0xFF0F0F1A) : const Color(0xFF8E8EA9),
+                          style: const TextStyle(
                             fontFamily: 'Poppins',
-                            fontWeight: FontWeight.w700,
                             fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF8E8EA9),
                           ),
                         ),
                       ),
+                      // Анімований бігунок-капсула
                       AnimatedPositioned(
                         duration: const Duration(milliseconds: 200),
-                        left: _voiceChatOn ? 36 : 2,
-                        top: 2,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: 21,
-                          height: 21,
+                        curve: Curves.easeInOut,
+                        left: _voiceChatOn ? 27 : 2,
+                        top: 3,
+                        child: Container(
+                          width: 31,
+                          height: 19,
                           decoration: BoxDecoration(
-                            color: _voiceChatOn ? const Color(0xFF181826) : const Color(0xFF2B2B3B),
-                            shape: BoxShape.circle,
+                            color: _voiceChatOn ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
+                            borderRadius: BorderRadius.circular(10), // Робить форму капсули
                             border: Border.all(
-                              color: _voiceChatOn ? const Color(0xFF181826) : const Color(0xFF00F5A0),
-                              width: 1.5,
+                              color: const Color(0xFF00F5A0),
+                              width: 1,
                             ),
                           ),
                         ),
@@ -683,289 +681,121 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 class GamerCard extends StatelessWidget {
   final GamerProfile profile;
   final Color accentColor;
+  final List<String> activeGames;
 
-  // Конструктор приймає accentColor, щоб не було помилок із областю видимості
-  const GamerCard(
-      {super.key, required this.profile, required this.accentColor});
+  const GamerCard({
+    super.key,
+    required this.profile,
+    required this.accentColor,
+    required this.activeGames,
+  });
 
   @override
   Widget build(BuildContext context) {
+    var common = profile.gamesList.where((g) => activeGames.contains(g)).toList();
+    String bestGame = common.isNotEmpty ? common[0] : (profile.gamesList.isNotEmpty ? profile.gamesList[0] : 'None');
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF181826),
         borderRadius: BorderRadius.circular(16),
-        border: profile.isPro
-            ? Border.all(color: accentColor.withValues(alpha: 0.2), width: 1.5)
-            : null,
+        border: profile.isPro ? Border.all(color: accentColor.withValues(alpha: 0.2), width: 1.5) : null,
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ВЕРХНЯ ЧАСТИНА: Аватарка, Нікнейм, Статуси
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Stack(
             children: [
-              Stack(
-                clipBehavior: Clip.none,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF181826),
-                      boxShadow: [
-                        if (profile.isOnline)
-                          BoxShadow(
-                            color: accentColor.withValues(alpha: 0.25),
-                            blurRadius: 5,
-                            spreadRadius: 0,
-                          )
-                        else
-                          BoxShadow(
-                            color: const Color(0xFF8E8EA9).withValues(
-                                alpha: 0.15),
-                            blurRadius: 4,
-                            spreadRadius: 0,
-                          ),
-                      ],
-                      border: Border.all(
-                        color: profile.isOnline
-                            ? accentColor.withValues(alpha: 0.8)
-                            : const Color(0xFF8E8EA9).withValues(alpha: 0.4),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        profile.nickname[0].toUpperCase(),
-                        style: TextStyle(
-                          fontFamily: 'Love Light',
-                          fontSize: 30,
-                          fontWeight: FontWeight.w400,
-                          height: 27 / 30,
-                          color: profile.isOnline ? accentColor : const Color(
-                              0xFF8E8EA9),
+                  // ЛІВА ЧАСТИНА: Аватар + Статуси
+                  Column(
+                    children: [
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFF181826),
+                          border: Border.all(color: profile.isOnline ? accentColor.withValues(alpha: 0.8) : const Color(0xFF8E8EA9).withValues(alpha: 0.4), width: 1.5),
+                        ),
+                        child: Center(
+                          child: Text(profile.nickname[0].toUpperCase(), style: TextStyle(fontFamily: 'Love Light', fontSize: 34, color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9))),
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            profile.nickname,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontFamily: 'Poppins',
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                        if (profile.isPro) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(colors: [
-                                accentColor,
-                                const Color(0xFF0066FF)
-                              ]),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'PRO',
-                              style: TextStyle(color: Colors.white,
-                                  fontFamily: 'Inter',
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 10),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          const Icon(Icons.star, color: Color(0xFFFFD700),
-                              size: 12),
-                          const SizedBox(width: 2),
-                          const Text(
-                            'PRO only',
-                            style: TextStyle(color: Color(0xFF8E8EA9),
-                                fontFamily: 'Inter',
-                                fontWeight: FontWeight.w700,
-                                fontSize: 8),
-                          ),
+                      const SizedBox(height: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9), shape: BoxShape.circle)), const SizedBox(width: 8), Text(profile.isOnline ? 'Online' : 'Offline', style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
+                          const SizedBox(height: 10),
+                          Row(children: [Icon(profile.hasVoice ? Icons.mic : Icons.mic_off, color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), size: 16), const SizedBox(width: 6), Text('Voice', style: TextStyle(color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
                         ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 16),
+                  // ПРАВА ЧАСТИНА: Нік, Гра, Теги + Languages
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(child: Text(profile.nickname, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w700, fontSize: 18))),
+                            if (profile.isPro) ...[
+                              const SizedBox(width: 8),
+                              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(gradient: LinearGradient(colors: [accentColor, const Color(0xFF0066FF)]), borderRadius: BorderRadius.circular(6)), child: const Text('PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11))),
+                            ],
+                          ],
+                        ),
+                        Text(bestGame, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 15)),
+                        const SizedBox(height: 10),
+                        // Теги (збільшений padding для вирівнювання з Voice)
+                        Wrap(spacing: 6, runSpacing: 6, children: profile.tags.map((t) => _buildTag(t)).toList()),
+                        const SizedBox(height: 6),
+                        Wrap(spacing: 6, runSpacing: 6, children: profile.platformsList.map((p) => _buildTag(p)).toList()),
+                        const SizedBox(height: 12),
+                        // Languages - повна назва, все сірим
+                        Text('Languages: ${profile.languages.join(" • ")}', style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500)),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${profile.mainGame} — ${profile.platform} ${profile
-                          .chatType.isNotEmpty ? "| " + profile.chatType : ""}',
-                      style: const TextStyle(color: Color(0xFF8E8EA9),
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w400,
-                          fontSize: 14),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      '+3 more matches',
-                      style: TextStyle(color: Color(0xFF8E8EA9),
-                          fontFamily: 'Inter',
-                          fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // СЕРЕДНЯ ЧАСТИНА: Мережевий статус, Голос, Мови
-          Row(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: profile.isOnline ? accentColor : const Color(
-                          0xFF8E8EA9),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    profile.isOnline ? 'Online' : 'Offline',
-                    style: const TextStyle(color: Color(0xFF8E8EA9),
-                        fontFamily: 'Inter',
-                        fontSize: 11),
                   ),
                 ],
               ),
-              const SizedBox(width: 16),
-              Row(
-                children: [
-                  Icon(
-                    profile.hasVoice ? Icons.mic : Icons.mic_off,
-                    color: profile.hasVoice ? accentColor : const Color(
-                        0xFF8E8EA9),
-                    size: 13,
+              if (profile.isPro)
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Row(
+                    children: [
+                      FigmaRatingStar(isFilled: true, size: 14),
+                      SizedBox(width: 4),
+                      Text('PRO only', style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 10)),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Voice',
-                    style: TextStyle(
-                        color: profile.hasVoice ? accentColor : const Color(
-                            0xFF8E8EA9), fontFamily: 'Inter', fontSize: 11),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  'Languages: ${profile.languages.join(" • ")}',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFF8E8EA9),
-                      fontFamily: 'Inter',
-                      fontSize: 11),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 14),
-
-          // ТЕГИ (Стиль гри)
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: profile.tags.map((tag) {
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(color: const Color(0xFF2B2B3B),
-                    borderRadius: BorderRadius.circular(8)),
-                child: Text(
-                  tag,
-                  style: const TextStyle(color: Colors.white,
-                      fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 10),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-
-          // НИЖНЯ ЧАСТИНА: Кнопки дій ("View profile" та "Invite to play")
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  // ТУТ НАЛАШТОВАНО ПЕРЕХІД НА ЕКРАН ПРОФІЛЮ
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            GamerProfileScreen(profile: profile),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: accentColor, width: 1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'View profile',
-                        style: TextStyle(color: accentColor,
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 21),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    print('Invite to play tapped');
-                  },
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(color: accentColor,
-                        borderRadius: BorderRadius.circular(12)),
-                    child: const Center(
-                      child: Text(
-                        'Invite to play',
-                        style: TextStyle(color: Color(0xFF0F0F1A),
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(height: 20),
+          Row(children: [Expanded(child: _buildButton('View profile', false)), const SizedBox(width: 12), Expanded(child: _buildButton('Invite to play', true))]),
         ],
       ),
     );
   }
+
+  Widget _buildTag(String text) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    decoration: BoxDecoration(color: const Color(0xFF2B2B3B), borderRadius: BorderRadius.circular(6)),
+    child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+  );
+
+  Widget _buildButton(String label, bool isAccent) => Container(
+    height: 44,
+    decoration: BoxDecoration(color: isAccent ? accentColor : Colors.transparent, border: isAccent ? null : Border.all(color: accentColor), borderRadius: BorderRadius.circular(12)),
+    child: Center(child: Text(label, style: TextStyle(color: isAccent ? const Color(0xFF0F0F1A) : accentColor, fontWeight: FontWeight.w700, fontSize: 15))),
+  );
 }
+
