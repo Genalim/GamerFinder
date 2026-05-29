@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'profile_setup_screen.dart';
 import 'Game_Selection.dart';
+import 'sign_in_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -131,7 +132,10 @@ class WelcomeScreen extends StatelessWidget {
 
                   GestureDetector(
                     onTap: () {
-                      // Логіка Sign In
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const SignInScreen()),
+                      );
                     },
                     child: const Text(
                       'Sign in',
@@ -140,7 +144,7 @@ class WelcomeScreen extends StatelessWidget {
                         color: Color(0xFF00FFD1),
                         fontSize: 20,
                         fontWeight: FontWeight.w400,
-                        height: 0.85,
+                        decoration: TextDecoration.underline, // додаємо підкреслення для впізнаваності
                       ),
                     ),
                   ),

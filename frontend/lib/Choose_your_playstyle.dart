@@ -62,6 +62,7 @@ class _PlayStyleScreenState extends State<PlayStyleScreen> {
       } else {
         selectionSet.add(value);
       }
+      _manager.selectedTimes = _selectedTimes;
     });
   }
 

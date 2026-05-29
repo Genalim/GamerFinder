@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'Home_Feed_screen.dart'; // Імпорт моделі GamerProfile
 import 'custom_widgets.dart';    // Твої реальні FigmaRatingStar, FigmaArrowIcon та нові SVG-іконки
 import 'package:auto_size_text/auto_size_text.dart';
+import 'user_session.dart';
 
 // Створюємо enum для зручного керування станами кнопки дружби
 enum FriendStatus {
@@ -84,7 +85,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               // 5. ПІДКЛЮЧЕНІ ПЛАТФОРМИ (Connected Platforms)
               _buildSectionTitle('Connected Platforms:', child: const ProfileConnectedIcon()),
               const SizedBox(height: 12),
-              _buildConnectedPlatforms(cardBg),
+              _buildConnectedAccounts(),
               const SizedBox(height: 24),
             ],
           ),
@@ -106,9 +107,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         ? widget.profile.languages.join(' • ')
         : 'Not specified';
 
-    final String playTimeText = widget.profile.playTime.isNotEmpty
-        ? widget.profile.playTime
-        : 'Evening • Late night';
+    final String playTimeText = widget.profile.readablePlayTime;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -595,17 +594,38 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
 
   // МЕТОД 3: Побудова сітки ігор
   Widget _buildGamesGrid(Color cardBg) {
-    final games = widget.profile.gamesList.isNotEmpty ? widget.profile.gamesList : ['Valorant', 'CS2', 'Fortnite', 'Apex'];
+    // Отримуємо ігри користувача
+    final myGames = UserSession().currentUser?.gamesList ?? [];
+    final games = widget.profile.gamesList;
+
+    // Робимо зелений колір трохи м'якшим, щоб не "горів"
+    const Color softGreen = Color(0xFF00C875);
+
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       children: games.map((game) {
+        final bool isMatch = myGames.contains(game);
+
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(8),
+            // Ледь помітна рамка, якщо гра збігається
+            border: isMatch
+                ? Border.all(color: softGreen.withOpacity(0.5), width: 1)
+                : null,
+          ),
           child: Text(
             game,
-            style: const TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w500, fontSize: 13),
+            style: TextStyle(
+              // Текст стає зеленим тільки якщо збігається, інакше залишається білим
+              color: isMatch ? softGreen : Colors.white.withOpacity(0.8),
+              fontFamily: 'Poppins',
+              fontWeight: isMatch ? FontWeight.w600 : FontWeight.w500,
+              fontSize: 13,
+            ),
           ),
         );
       }).toList(),
@@ -651,36 +671,56 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   }
 
   // МЕТОД 6: Connected Platforms
-  Widget _buildConnectedPlatforms(Color cardBg) {
-    final Map<String, String> platforms = widget.profile.connectedPlatforms.isNotEmpty
-        ? widget.profile.connectedPlatforms
-        : {'Discord': 'Player#1234', 'Steam': 'Player1'};
+  Widget _buildConnectedAccounts() {
+    if (widget.profile.connectedPlatforms.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Column(
-      children: platforms.entries.map((entry) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+      children: widget.profile.connectedPlatforms.entries.map((entry) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 15), // Відступ між рядами
+          height: 28, // Висота згідно з вашим CSS
           child: Row(
             children: [
+              // КОНТЕЙНЕР НАЗВИ (Discord)
               Container(
                 width: 101,
                 height: 28,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF181826),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(12)),
                 child: Text(
                   entry.key,
-                  style: const TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w500, fontSize: 13),
+                  style: const TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white,
+                  ),
                 ),
               ),
-              const SizedBox(width: 15),
+              const SizedBox(width: 15), // Gap: 15px згідно з вашим CSS
+
+              // КОНТЕЙНЕР ID (Player#1234)
               Expanded(
                 child: Container(
                   height: 28,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF181826),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(12)),
                   child: Text(
                     entry.value,
-                    style: const TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w500, fontSize: 13),
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
