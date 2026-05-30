@@ -20,7 +20,7 @@
     "email": "gena@gmail.com",
     "password": "3333",
     "avatar": "assets/avatars/free/avatar_free_11.jpg",
-    "games": ["Valorant", "League of Legends", "FIFA 21"],
+    "games": ["Valorant", "League of Legends", "FIFA 21", "Apex Legends"],
     "platforms": ["PC", "Xbox", "Mobile", "Switch", "PS"],
     "play_styles": ["Casual", "Co-op", "Training", "Competitive"],
     "times": [12, 13, 14, 15, 16, 17, 23, 0, 1, 2, 3, 4, 5, 18, 19, 20, 21, 22, 6, 7, 8, 9, 10, 11],
@@ -42,7 +42,7 @@
     "email": "redme@red.ro",
     "password": "1234",
     "avatar": null,
-    "games": ["Apex Legends", "Valorant"],
+    "games": ["Apex Legends", "Valorant", "League of Legends", "FIFA 21"],
     "platforms": ["Xbox"],
     "play_styles": ["Casual", "Training"],
     "times": [18, 19, 20, 21, 22],
@@ -156,8 +156,8 @@
     "connected_accounts": {
       "TeamSpeak": "fdddfff"
     },
-    "is_online": true,
-    "is_pro": false
+    "is_online": false,
+    "is_pro": true
   },
   {
     "nickname": "player5",

@@ -800,34 +800,53 @@ class GamerCard extends StatelessWidget {
                   Column(
                     children: [
                       Container(
-                        width: 72,
-                        height: 72,
+                        width: 64,
+                        height: 64,
+                        // Перетворюємо CSS властивості на BoxDecoration
                         decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF181826),
+                          color: const Color(0xFF181826), // background
+                          borderRadius: BorderRadius.circular(100), // border-radius
                           boxShadow: [
                             BoxShadow(
-                              color: profile.isOnline ? accentColor.withValues(alpha: 0.3) : Colors.transparent,
-                              blurRadius: 12,
-                              spreadRadius: 2,
+                              // Якщо онлайн — яскраве акцентне сяйво
+                              // Якщо офлайн — глибока, "важча" сіра тінь (менше радіус, більше кольору)
+                              color: profile.isOnline
+                                  ? accentColor.withValues(alpha: 0.4) // Яскравіше для онлайн
+                                  : const Color(0xFF505060).withValues(alpha: 0.4), // Темніший сірий для офлайн
+                              blurRadius: profile.isOnline ? 4 : 2, // Менше розмиття для офлайн — тінь стає чіткішою
+                              spreadRadius: profile.isOnline ? 2 : 3, // Не розповсюджуємо тінь для офлайн
                             ),
                           ],
-                          border: Border.all(
-                            color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9).withValues(alpha: 0.4),
-                            width: 2,
-                          ),
                         ),
-                        child: ClipOval(
-                          child: (profile.avatar != null && profile.avatar!.isNotEmpty)
-                              ? Image.asset(
+                        // Властивості Flex для центрування тексту ("S")
+                        child:(profile.avatar != null && profile.avatar!.isNotEmpty)
+                            ? ClipOval(
+                          child: Image.asset(
                             profile.avatar!,
                             fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(),
-                          )
-                              : _buildLetterAvatar(),
+                            width: 72,
+                            height: 72,
+                          ),
+                        )
+
+                        :Center(
+                          child: Text(
+                            // Беремо першу літеру і переводимо у верхній регістр
+                            profile.nickname.isNotEmpty
+                                ? profile.nickname[0].toUpperCase()
+                                : '?',
+                            style: TextStyle(
+                              fontFamily: 'Love Light',
+                              fontSize: 30,
+                              fontWeight: FontWeight.w400,
+                              color: profile.isOnline
+                                  ? const Color(0xFF00F5A0)
+                                  : const Color(0xFF8E8EA9),
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -845,15 +864,46 @@ class GamerCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Flexible(child: Text(profile.nickname, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w700, fontSize: 18))),
-                            if (profile.isPro) ...[
-                              const SizedBox(width: 8),
-                              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0), decoration: BoxDecoration(gradient: LinearGradient(colors: [accentColor, const Color(0xFF0066FF)]), borderRadius: BorderRadius.circular(6)), child: const Text('PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11))),
+                        // Рядок з іменем та тегом PRO
+                        Padding(
+                          padding: const EdgeInsets.only(right: 60), // "Стіна" для захисту від зірочки
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  profile.nickname,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontFamily: 'Poppins',
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                              ),
+                              if (profile.isPro) ...[
+                                const SizedBox(width: 2),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(colors: [accentColor, Color(0xFF0066FF)]),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'PRO',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
+
+                        const SizedBox(height: 7), // Трохи простору під ніком
 
                         Text(
                           gameInfo['text'],
@@ -862,21 +912,38 @@ class GamerCard extends StatelessWidget {
                         ),
 
                         if (gameInfo['count'] > 2 || (gameInfo['count'] == 2 && gameInfo['isTruncated']))
-                        Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                        gameInfo['count'] > 2
-                        ? '+${gameInfo['count'] - 2} more matches'
-                            : '+1 more match',
-                        style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              gameInfo['count'] > 2
+                                  ? '+${gameInfo['count'] - 2} more matches'
+                                  : '+1 more match',
+                              style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+
+                        const SizedBox(height: 4),
+
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: profile.tags.map((t) => _buildTag(t)).toList(),
                         ),
+
+                        const SizedBox(height: 4),
+
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: profile.platformsList.map((p) => _buildTag(p)).toList(),
                         ),
-                        const SizedBox(height: 10),
-                        Wrap(spacing: 6, runSpacing: 6, children: profile.tags.map((t) => _buildTag(t)).toList()),
-                        const SizedBox(height: 6),
-                        Wrap(spacing: 6, runSpacing: 6, children: profile.platformsList.map((p) => _buildTag(p)).toList()),
-                        const SizedBox(height: 10),
-                        Text('Languages: ${profile.languages.join(" • ")}', style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500)),
+
+                        const SizedBox(height: 4),
+
+                        Text(
+                          'Languages: ${profile.languages.join(" • ")}',
+                          style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500),
+                        ),
                       ],
                     ),
                   ),
@@ -887,7 +954,7 @@ class GamerCard extends StatelessWidget {
                 right: 0,
                 child: Row(
                   children: [
-                    FigmaRatingStar(isFilled: true, size: 14),
+                    FigmaRatingStar(isFilled: true, size: 11),
                     SizedBox(width: 4),
                     Text(
                         'PRO only',
@@ -895,7 +962,7 @@ class GamerCard extends StatelessWidget {
                             color: Color(0xFF8E8EA9),
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.w700,
-                            fontSize: 10
+                            fontSize: 7
                         )
                     ),
                   ],
