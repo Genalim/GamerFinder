@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 class ProfileSetupManager {
+  List<int> savedGameIds = [];
   Set<String> selectedLanguages = {};
 
   // Приватний конструктор та єдиний екземпляр (Синглтон)
@@ -61,12 +62,22 @@ class ProfileSetupManager {
 
   // === МЕТОД ДЛЯ ФОРМУВАННЯ ДАНИХ (JSON) ===
   String toJson() {
+    List<Map<String, dynamic>> gamesData = savedGamesList
+        .where((game) => selectedGames.contains(game.name))
+        .map((game) => {
+      'igdb_id': game.id, // Оригінальний ID з IGDB
+      'name': game.name,
+      'image_url': game.imageUrl,
+      'genres': game.genres,
+    })
+        .toList();
+
     final Map<String, dynamic> data = {
       'nickname': nickname,
       'email': email,
       'password': password,
       'avatar': selectedAvatarPath,
-      'games': selectedGames.toList(),
+      'games': savedGameIds,
       'platforms': selectedPlatforms.toList(),
       'play_styles': selectedPlayStyles.toList(),
       // Тепер записуємо години UTC (як список чисел)
@@ -84,6 +95,7 @@ class ProfileSetupManager {
 
   // Метод для повного скидання даних
   void reset() {
+    savedGameIds.clear();
     savedGamesList.clear();
     selectedGames.clear();
     selectedPlatforms.clear();

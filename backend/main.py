@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession as Session
 from contextlib import asynccontextmanager
 
 from database import get_db, engine, Base
@@ -13,6 +15,12 @@ from fastapi import File, UploadFile
 import shutil
 import os
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
+from fastapi import Request, status
+from fastapi.responses import JSONResponse
+from fastapi import Depends
+
+
 
 # 1. СПОЧАТКУ функція lifespan
 @asynccontextmanager
@@ -21,11 +29,21 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     yield
 
+
 # 2. ПОТІМ створення app ОДИН РАЗ
 app = FastAPI(title="GamerFinder API", lifespan=lifespan)
 
 #Це для аватарок клієнта.
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    print(f"!!! ПОМИЛКА ВАЛІДАЦІЇ: {exc.errors()}")  # Це виведе деталі в консоль!
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
 
 # 3. ТЕПЕР всі ендпоінти ПІСЛЯ створення app
 @app.post("/register")
@@ -65,7 +83,24 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
 
     # Ігри (тепер приймаємо список ID)
     for game_id in user_data.games:
-        db.add(UserGames(user_id=new_user.id, game_id=game_id))
+        # 1. Перевіряємо, чи існує гра з ТАКИМ ID
+        result = await db.execute(select(Game).filter(Game.id == game_id))
+        game = result.scalar_one_or_none()
+
+        # 2. Якщо гри немає, ми створюємо її "на льоту"
+        # (або можна додати запит до IGDB, якщо потрібні деталі)
+        if not game:
+            new_game = Game(
+                id=game_id,
+                name="Unknown Game", # Можна передавати назву з фронту, якщо хочеш
+                image_url="",
+                genres=[]
+            )
+            db.add(new_game)
+            await db.flush() # Тепер ID існує в базі
+
+        # 3. Додаємо зв'язок
+        db.add(UserGames(user_id=new_user.id, game_id=game_id, style="default"))
 
     # Зв'язані акаунти
     for service, username in user_data.connected_accounts.items():
@@ -75,9 +110,6 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     for style in user_data.play_styles:
         db.add(UserStyles(user_id=new_user.id, style=style))
 
-    # Додаємо час (використовуємо твій готовий метод з менеджера)
-    for hour in user_data.times:
-        db.add(UserAvailability(user_id=new_user.id, utc_hour=hour))
 
     # Фіксуємо зміни в базі
     await db.commit()
@@ -131,22 +163,31 @@ async def check_nickname(nickname: str, db: AsyncSession = Depends(get_db)):
     return {"exists": False}
 
 @app.post("/ensure-game")
-async def ensure_game(game_data: dict, db: AsyncSession = Depends(get_db)):
-    # Шукаємо гру за назвою
-    result = await db.execute(select(Game).filter(Game.name == game_data['name']))
-    game = result.scalars().first()
+async def ensure_game(data: dict, db: AsyncSession = Depends(get_db)):
+    igdb_id = data.get("igdb_id")
+    name = data.get("name")
+    image_url = data.get("image_url")
+    genres = data.get("genres")
 
-    if not game:
-        game = Game(
-            name=game_data['name'],
-            image_url=game_data['image_url'],
-            genres=game_data['genres']
+    # 1. Замість db.query(...) використовуємо select(...)
+    result = await db.execute(select(Game).filter(Game.igdb_id == igdb_id))
+    existing_game = result.scalars().first()
+
+    if existing_game:
+        return {"id": existing_game.id}
+    else:
+        # 2. Створюємо об'єкт
+        new_game = Game(
+            igdb_id=igdb_id,
+            name=name,
+            image_url=image_url,
+            genres=str(genres)
         )
-        db.add(game)
+        db.add(new_game)
+        # 3. Асинхронний commit
         await db.commit()
-        await db.refresh(game)
-
-    return {"game_id": game.id}
+        await db.refresh(new_game)
+        return {"id": new_game.id}
 
 @app.post("/upload-avatar")
 async def upload_avatar(file: UploadFile = File(...)):
@@ -159,6 +200,12 @@ async def upload_avatar(file: UploadFile = File(...)):
 
     # Повертаємо шлях, за яким фото буде доступне
     return {"url": f"http://127.0.0.1:8000/{file_location}"}
+
+@app.get("/games")
+async def get_games(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Game))
+    games = result.scalars().all()
+    return [{"id": g.id, "name": g.name, "image_url": g.image_url, "genres": g.genres} for g in games]
 
 if __name__ == "__main__":
     import uvicorn

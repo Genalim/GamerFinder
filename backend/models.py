@@ -57,6 +57,7 @@ class UserAccounts(Base):
 
 class Game(Base):
     __tablename__ = "games"
+    igdb_id = Column(Integer, index=True)
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True) # Назва має бути унікальною
     image_url = Column(String)

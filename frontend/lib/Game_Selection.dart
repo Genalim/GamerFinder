@@ -8,6 +8,7 @@ import 'profile_setup_manager.dart';
 
 class GameModel {
   final String id;
+  final String? igdbId;
   final String name;
   final String imageUrl;
   final List<String> genres;
@@ -15,6 +16,7 @@ class GameModel {
 
   GameModel({
     required this.id,
+    this.igdbId,
     required this.name,
     required this.imageUrl,
     required this.genres,
@@ -30,6 +32,55 @@ class GameSelectionScreen extends StatefulWidget {
 }
 
 class _GameSelectionScreenState extends State<GameSelectionScreen> {
+  // Змінна для контролю завантаження ігор на скрін з бази
+  bool _isLoadingInitialGames = true;
+
+  Future<void> _fetchGamesFromDB() async {
+    try {
+      final response = await http.get(Uri.parse("http://10.0.2.2:8000/games")); // Переконайся, що такий ендпоінт є на бекенді
+      print("Статус код: ${response.statusCode}");
+      print("Тіло відповіді: ${response.body}"); // <--- ЦЕ НАЙВАЖЛИВІШЕ
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        print("Кількість отриманих ігор: ${data.length}"); // <--- Перевірка кількості
+        setState(() {
+          _games = data.map((json) {
+            // Безпечне перетворення жанрів
+            List<String> parsedGenres = [];
+            try {
+              var rawGenres = json['genres'];
+              if (rawGenres is String) {
+                // Якщо це рядок (як у тебе зараз "[...]"), перетворюємо на список
+                parsedGenres = List<String>.from(jsonDecode(rawGenres));
+              } else if (rawGenres is List) {
+                // Якщо раптом прийшов готовий список
+                parsedGenres = List<String>.from(rawGenres);
+              }
+            } catch (e) {
+              debugPrint("Помилка парсингу жанрів для гри ${json['name']}: $e");
+            }
+
+            return GameModel(
+              id: json['id'].toString(),
+              igdbId: json['igdb_id']?.toString(),
+              name: json['name'],
+              imageUrl: json['image_url'] ?? '',
+              genres: parsedGenres,
+              isFromApi: false,
+            );
+          }).toList();
+
+          _isLoadingInitialGames = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка завантаження ігор з бази: $e");
+      setState(() => _isLoadingInitialGames = false);
+    }
+  }
+
+
   final _manager = ProfileSetupManager.instance;
   final String _clientId = 'e8f46ha10ff5jvy6d0ysmgpw2kei32';
   final String _clientSecret = 'xwqcj3necpyerb7xxscnr227ekmqzj';
@@ -45,7 +96,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
   bool _isLoadingApi = false;
   Timer? _debounce;
 
-  late List<GameModel> _games;
+  List<GameModel> _games = [];
 
   final List<String> _genresList = [
     'Shooter', 'RPG', 'Strategy', 'Adventure', 'Action', 'Indie', 'RTS', 'TBS',
@@ -56,17 +107,18 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
   void initState() {
     super.initState();
     _selectedGames = Set.from(_manager.selectedGames);
-
-    if (_manager.savedGamesList.isNotEmpty) {
-      _games = List<GameModel>.from(_manager.savedGamesList);
-    } else {
-      _games = [
-        GameModel(id: '1', name: 'Apex Legends', imageUrl: 'ApexLegends.png', genres: ['Shooter', 'Battle Royale']),
-        GameModel(id: '5', name: 'CS:GO', imageUrl: 'CSGO.png', genres: ['Shooter']),
-        GameModel(id: '13', name: 'League of Legends', imageUrl: 'LeagueofLegends.png', genres: ['MOBA']),
-        GameModel(id: '19', name: 'Valorant', imageUrl: 'Valorant.png', genres: ['Shooter', 'Action']),
-      ];
-    }
+    _fetchGamesFromDB();
+    //===Заглушки що тягнулись для тесту закоментовані, тепер з бази тягнемо ігри.
+    //if (_manager.savedGamesList.isNotEmpty) {
+     // _games = List<GameModel>.from(_manager.savedGamesList);
+    //} else {
+      //_games = [
+       // GameModel(id: '1', name: 'Apex Legends', imageUrl: 'ApexLegends.png', genres: ['Shooter', 'Battle Royale']),
+       // GameModel(id: '5', name: 'CS:GO', imageUrl: 'CSGO.png', genres: ['Shooter']),
+      //  GameModel(id: '13', name: 'League of Legends', imageUrl: 'LeagueofLegends.png', genres: ['MOBA']),
+      //  GameModel(id: '19', name: 'Valorant', imageUrl: 'Valorant.png', genres: ['Shooter', 'Action']),
+     // ];
+    //}
   }
 
   Future<void> _getAccessToken() async {
@@ -246,16 +298,43 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                 return ListTile(
                   leading: const Icon(Icons.public, color: Color(0xFF00F5A0), size: 18),
                   title: Text(game.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                  onTap: () {
-                    setState(() {
-                      if (!_games.any((g) => g.name == game.name)) {
-                        _games.insert(0, game);
-                        _selectedGames.add(game.name);
+                  onTap: () async {
+                    final game = _apiResults[index]; // Це вибрана гра з API
+
+                    try {
+                      final response = await http.post(
+                          Uri.parse("http://10.0.2.2:8000/ensure-game"),
+                          headers: {"Content-Type": "application/json"},
+                          body: json.encode({
+                            "igdb_id": int.tryParse(game.id), // ID з IGDB
+                            "name": game.name,
+                            "image_url": game.imageUrl,
+                            "genres": game.genres
+                          })
+                      );
+
+                      if (response.statusCode == 200) {
+                        final responseData = json.decode(response.body);
+                        int gameId = responseData['id']; // ID, який дав бекенд
+
+                        setState(() {
+                          // Оновлюємо менеджер
+                          if (!_manager.savedGameIds.contains(gameId)) {
+                            _manager.savedGameIds.add(gameId);
+                          }
+                          // Оновлюємо UI
+                          if (!_games.any((g) => g.name == game.name)) {
+                            _games.insert(0, game);
+                            _selectedGames.add(game.name);
+                          }
+                          _searchController.clear();
+                        });
+                        _closeSearchDropdown();
+                        FocusScope.of(context).unfocus();
                       }
-                      _searchController.clear();
-                    });
-                    _closeSearchDropdown();
-                    FocusScope.of(context).unfocus();
+                    } catch (e) {
+                      debugPrint("Помилка: $e");
+                    }
                   },
                 );
               },
@@ -282,6 +361,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
         itemCount: squad.length,
         itemBuilder: (context, index) {
           final game = squad[index];
+          debugPrint("Картинка для ${game.name}: ${game.imageUrl}");
           return Container(
             margin: const EdgeInsets.only(right: 14),
             width: 64,
@@ -293,9 +373,24 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                       width: 60, height: 60,
                       decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: accentColor, width: 1.5)),
                       child: ClipOval(
-                        child: game.isFromApi
-                            ? Image.network(game.imageUrl, fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.gamepad, color: Colors.white24, size: 24))
-                            : Image.asset('assets/images/game_images/${game.imageUrl}', fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.gamepad, color: Colors.white24, size: 24)),
+
+                        child: (game.imageUrl.isNotEmpty && game.imageUrl.contains('http'))
+                            ? Image.network(
+                          game.imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            debugPrint("Помилка завантаження мережевої картинки: $error");
+                            return const Icon(Icons.gamepad, color: Colors.white24, size: 24);
+                          },
+                        )
+                            : Image.asset(
+                          'assets/images/game_images/${game.imageUrl}',
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            debugPrint("Помилка завантаження локальної картинки: $error");
+                            return const Icon(Icons.gamepad, color: Colors.white24, size: 24);
+                          },
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -439,7 +534,23 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
         final game = filteredGames[index];
         final isSelected = _selectedGames.contains(game.name);
         return GestureDetector(
-          onTap: () => setState(() => isSelected ? _selectedGames.remove(game.name) : _selectedGames.add(game.name)),
+          onTap: () {
+            setState(() {
+              if (_selectedGames.contains(game.name)) {
+                _selectedGames.remove(game.name);
+                // Можна також видалити ID з менеджера, якщо треба
+              } else {
+                _selectedGames.add(game.name);
+                // Додаємо ID в список, якщо його там ще немає
+                if (game.id != null) {
+                  int id = int.tryParse(game.id) ?? 0;
+                  if (!_manager.savedGameIds.contains(id)) {
+                    _manager.savedGameIds.add(id);
+                  }
+                }
+              }
+            });
+          },
           child: Container(
             decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(12), border: isSelected ? Border.all(color: accentColor, width: 2) : null),
             child: Column(
@@ -447,9 +558,21 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                 const SizedBox(height: 10),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: game.isFromApi
-                      ? Image.network(game.imageUrl, width: 140, height: 140, fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.gamepad, color: Colors.white24))
-                      : Image.asset('assets/images/game_images/${game.imageUrl}', width: 140, height: 140, fit: BoxFit.cover),
+                  child: game.imageUrl.startsWith('http')
+                      ? Image.network(
+                      game.imageUrl,
+                      width: 140,
+                      height: 140,
+                      fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => const Icon(Icons.gamepad, color: Colors.white24, size: 50)
+                  )
+                      : Image.asset(
+                      'assets/images/game_images/${game.imageUrl}',
+                      width: 140,
+                      height: 140,
+                      fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => const Icon(Icons.gamepad, color: Colors.white24, size: 50)
+                  ),
                 ),
                 Padding(padding: const EdgeInsets.only(top: 10, left: 8, right: 8), child: Text(game.name, style: TextStyle(fontFamily: 'Poppins', fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500, fontSize: 14, color: isSelected ? accentColor : Colors.white), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 Padding(padding: const EdgeInsets.only(top: 4, left: 8, right: 8), child: Text(game.genres.isNotEmpty ? game.genres.join(' / ') : 'Action', style: TextStyle(fontFamily: 'Poppins', fontSize: 11, color: isSelected ? accentColor : Colors.white54), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis)),

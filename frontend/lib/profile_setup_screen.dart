@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -6,6 +7,9 @@ import 'custom_widgets.dart';
 import 'package:flutter/services.dart';
 import 'Email_verification_screen.dart';
 import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР СТАНУ
+import 'package:http/http.dart' as http;
+import 'package:image_cropper/image_cropper.dart';
+import 'dart:convert';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -15,12 +19,106 @@ class ProfileSetupScreen extends StatefulWidget {
 }
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
+  bool _isLoading = false;
+  bool _isNicknameValid = true;
+  String? _nicknameError;
+
+  Future<void> _handleFinish() async {
+    setState(() => _isLoading = true);
+    // 1. Спочатку визначаємо, що ми вантажимо: своє фото чи стандартне
+    String? avatarUrl = _selectedAvatarPath; // якщо це шлях з ассетів
+
+    if (_imageFile != null) {
+      // Юзер обрав своє фото, вантажимо його на сервер
+      avatarUrl = await _uploadAvatarToServer(_imageFile!.path);
+    }
+
+    // 2. Фіксуємо дані в менеджері
+    _manager.nickname = _nicknameController.text;
+    _manager.email = _emailController.text;
+    _manager.password = _passwordController.text;
+    _manager.selectedAvatarPath = avatarUrl; // Зберігаємо отриманий URL або старий шлях
+
+    _platformControllers.forEach((key, controller) {
+      if (controller.text.isNotEmpty) {
+        _manager.connectedAccounts[key] = controller.text;
+      }
+    });
+
+    // 3. Відправляємо на бекенд
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.2.2:8000/register'),
+        headers: {"Content-Type": "application/json"},
+        body: _manager.toJson(),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(email: _emailController.text),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print("Помилка реєстрації: $e");
+    }
+    setState(() => _isLoading = false);
+  }
+
+  //====  Перевырка чи э нікнейм вже ===
+  Future<void> _checkNicknameAvailability(String nickname) async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://10.0.2.2:8000/check-nickname/$nickname'),
+      );
+
+      if (response.statusCode == 200) {
+        final exists = json.decode(response.body)['exists'];
+        setState(() {
+          if (exists) {
+            _nickMsg = "Nickname already taken";
+            _nickColor = const Color(0xFFFF3B5C);
+            _nickValid = false;
+          } else {
+            _nickMsg = "Nickname is available";
+            _nickColor = const Color(0xFF00F5A0);
+            _nickValid = true;
+          }
+        });
+      }
+    } catch (e) {
+      print("Помилка при перевірці: $e");
+    }
+  }
+
+// Твій допоміжний метод для завантаження
+  Future<String?> _uploadAvatarToServer(String filePath) async {
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse('http://10.0.2.2:8000/upload-avatar'));
+      request.files.add(await http.MultipartFile.fromPath('file', filePath));
+      var res = await request.send();
+
+      if (res.statusCode == 200) {
+        var responseData = await res.stream.bytesToString();
+        return json.decode(responseData)['url'];
+      }
+    } catch (e) {
+      print("Помилка завантаження: $e");
+    }
+    return null;
+  }
+
   // === 2. ПІДКЛЮЧАЄМО ЄДИНИЙ МЕНЕДЖЕР ===
   final _manager = ProfileSetupManager.instance;
 
   List<String> _freeAvatars = [];
   List<String> _proAvatars = [];
   bool _isLoadingAssets = true;
+  Timer? _nickDebounce;
 
   // Контролери робимо late, щоб заповнити їх в initState з менеджера
   late TextEditingController _nicknameController;
@@ -58,6 +156,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final Map<String, Color> _pColors = {};
   final Map<String, bool> _pValid = {};
 
+  @override
+  void dispose() {
+    _nicknameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _platformControllers.forEach((key, controller) => controller.dispose());
+    _nickDebounce?.cancel(); // Це зупинить таймер при закритті екрана
+    super.dispose();
+  }
+
   // === 3. ПІДТЯГУЄМО ДАНІ, ЯКЩО КОРИСТУВАЧ ПОВЕРНУВСЯ ===
   @override
   void initState() {
@@ -81,6 +189,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _pColors[p] = const Color(0xFF6F6F80);
       _pValid[p] = false;
     }
+
   }
 
   @override
@@ -138,33 +247,76 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Future<void> _pickImage(ImageSource source) async {
     final XFile? pickedFile = await _picker.pickImage(source: source);
     if (pickedFile != null) {
-      setState(() {
-        _imageFile = File(pickedFile.path);
-        _selectedAvatarPath = null;
-      });
+      // 1. Одразу після вибору запускаємо кропер
+      final CroppedFile? croppedFile = await ImageCropper().cropImage(
+        sourcePath: pickedFile.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1), // Робимо квадрат
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop Avatar',
+            toolbarColor: const Color(0xFF0F0F1A),
+            toolbarWidgetColor: Colors.white,
+            activeControlsWidgetColor: const Color(0xFF00F5A0),
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: true,
+          ),
+        ],
+      );
+
+      if (croppedFile != null) {
+        setState(() {
+          // 2. Тепер зберігаємо шлях до вже обрізаного файлу
+          _imageFile = File(croppedFile.path);
+          _selectedAvatarPath = null; // Стандартну аватарку скидаємо
+        });
+        Navigator.pop(context); // Закриваємо модалку після вибору
+      }
     }
   }
 
-  void _validateNick(String v) {
+  Future<void> _validateNick(String v) async {
+    final reg = RegExp(r'^[a-zA-Z0-9_.]+$');
+
+    if (_nickDebounce?.isActive ?? false) _nickDebounce!.cancel();
+
+    // 1. Спочатку скидаємо валідність
     setState(() {
-      final reg = RegExp(r'^[a-zA-Z0-9_.]+$');
-      if (v.isEmpty) {
+      _nickValid = false; // ПРИМУСОВО СКИНУЛИ
+    });
+
+    // 2. Локальні перевірки
+    if (v.isEmpty) {
+      setState(() {
         _nickMsg = "3–20 characters, letters, numbers, . or _ only";
         _nickColor = const Color(0xFF6F6F80);
-        _nickValid = false;
-      } else if (v.length < 3 || v.length > 20) {
+      });
+      return;
+    }
+
+    if (v.length < 3 || v.length > 20) {
+      setState(() {
         _nickMsg = "Nickname must be 3–20 characters";
         _nickColor = const Color(0xFFFF3B5C);
-        _nickValid = false;
-      } else if (!reg.hasMatch(v)) {
+      });
+      return;
+    }
+
+    if (!reg.hasMatch(v)) {
+      setState(() {
         _nickMsg = "Only letters, numbers, . or _ allowed";
         _nickColor = const Color(0xFFFF3B5C);
-        _nickValid = false;
-      } else {
-        _nickMsg = "Nickname is available";
-        _nickColor = const Color(0xFF00F5A0);
-        _nickValid = true;
-      }
+      });
+      return;
+    }
+
+    // 3. Якщо локально все ОК, тоді перевіряємо сервер
+    setState(() {
+      _nickMsg = "Checking availability...";
+      _nickColor = Colors.white70;
+    });
+
+    _nickDebounce = Timer(const Duration(milliseconds: 500), () async {
+      await _checkNicknameAvailability(v);
     });
   }
 
@@ -793,37 +945,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       child: NeonFinishButton(
         isActive: _isFormReady,
         onTap: () async {
-          if (_isFormReady) {
-            // 1. Фіксуємо дані в менеджері
-            _manager.nickname = _nicknameController.text;
-            _manager.email = _emailController.text;
-            _manager.password = _passwordController.text;
-            _manager.selectedAvatarPath = _selectedAvatarPath;
+          if (!_isFormReady) return;
 
-            _platformControllers.forEach((key, controller) {
-              if (controller.text.isNotEmpty) {
-                _manager.connectedAccounts[key] = controller.text;
-              }
-            });
-
-            // 2. Формуємо JSON і виводимо в консоль
-            // Тепер ви копіюєте це з консолі і вставляєте в assets/users.json
-            String jsonContent = _manager.toJson();
-
-            print("=== COPY THIS JSON TO assets/users.json ===");
-            print(jsonContent);
-            print("============================================");
-
-            // 3. Перехід далі
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => EmailVerificationScreen(
-                  email: _emailController.text,
-                ),
-              ),
-            );
-          }
+          // Показуємо лоадер, якщо треба (опціонально)
+          await _handleFinish();
         },
       ),
     );
