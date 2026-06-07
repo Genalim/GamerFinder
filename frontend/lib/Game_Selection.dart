@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
 import 'Chose_your_platform.dart';
 import 'profile_setup_manager.dart';
+import 'api_config.dart';
 
 class GameModel {
   final String id;
@@ -37,7 +38,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
   Future<void> _fetchGamesFromDB() async {
     try {
-      final response = await http.get(Uri.parse("http://10.0.2.2:8000/games")); // Переконайся, що такий ендпоінт є на бекенді
+      final response = await http.get(Uri.parse("${ApiConfig.baseUrl}/games")); // Переконайся, що такий ендпоінт є на бекенді
       print("Статус код: ${response.statusCode}");
       print("Тіло відповіді: ${response.body}"); // <--- ЦЕ НАЙВАЖЛИВІШЕ
 
@@ -303,7 +304,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
                     try {
                       final response = await http.post(
-                          Uri.parse("http://10.0.2.2:8000/ensure-game"),
+                          Uri.parse("${ApiConfig.baseUrl}/ensure-game"),
                           headers: {"Content-Type": "application/json"},
                           body: json.encode({
                             "igdb_id": int.tryParse(game.id), // ID з IGDB

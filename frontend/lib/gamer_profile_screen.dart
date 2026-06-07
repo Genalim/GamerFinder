@@ -3,6 +3,7 @@ import 'Home_Feed_screen.dart'; // Імпорт моделі GamerProfile
 import 'custom_widgets.dart';    // Твої реальні FigmaRatingStar, FigmaArrowIcon та нові SVG-іконки
 import 'package:auto_size_text/auto_size_text.dart';
 import 'user_session.dart';
+import 'api_service.dart';
 
 // Створюємо enum для зручного керування станами кнопки дружби
 enum FriendStatus {
@@ -27,6 +28,33 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   // Контролер для керування показом меню опцій (Remove / Block / Unblock)
   final _overlayController = OverlayPortalController();
   final _layerLink = LayerLink();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchStatus();
+  }
+
+  Future<void> _fetchStatus() async {
+    try {
+      final status = await ApiService.getFriendStatus(widget.profile.id);
+
+      // Перевіряємо, чи ще актуальний цей віджет (щоб уникнути помилок після закриття)
+      if (!mounted) return;
+
+      setState(() {
+        if (status == "pending") {
+          _currentStatus = FriendStatus.requestSent;
+        } else if (status == "accepted") {
+          _currentStatus = FriendStatus.friends;
+        } else {
+          _currentStatus = FriendStatus.addFriend;
+        }
+      });
+    } catch (e) {
+      print("Помилка при отриманні статусу: $e");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,6 +127,19 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
     );
   }
 
+  Widget _buildPlaceholder(Color statusColor) {
+    return Center(
+      child: Text(
+        widget.profile.nickname.isNotEmpty ? widget.profile.nickname[0].toUpperCase() : 'G',
+        style: TextStyle(
+          fontFamily: 'Love Light',
+          fontSize: 50,
+          color: statusColor,
+        ),
+      ),
+    );
+  }
+
   // МЕТОД 1: Хедер профілю (З інтерактивними кнопками Add Friend / Request Sent / Friends)
   Widget _buildHeader(Color accentColor) {
     final Color statusColor = widget.profile.isOnline ? accentColor : const Color(0xFF8E8EA9);
@@ -113,31 +154,54 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Аватарка
-        Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF181826),
-            border: Border.all(color: statusColor, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: statusColor.withOpacity(0.3),
-                blurRadius: 8,
-                spreadRadius: 0,
-              )
-            ],
-          ),
-          child: Center(
-            child: Text(
-              widget.profile.nickname.isNotEmpty ? widget.profile.nickname[0].toUpperCase() : 'G',
-              style: TextStyle(
-                fontFamily: 'Love Light',
-                fontSize: 50,
-                color: statusColor,
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            // 1. Шар великого сяйва (це і є ваше drop-shadow)
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: statusColor.withOpacity(0.6),
+                    blurRadius: 8,
+                    spreadRadius: -2,
+                  ),
+                ],
               ),
             ),
-          ),
+            // 2. Аватарка (БЕЗ жорсткої рамки Border)
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                // Замість Border.all ми додаємо внутрішню тінь або ледь помітний інший ефект,
+                // АБО просто обрізаємо картинку.
+                // Якщо треба саме підсвічений край — додайте сюди BoxShadow з малим blur:
+                boxShadow: [
+                  BoxShadow(
+                    color: statusColor,
+                    blurRadius: 0.2, // Дуже тонкий м'який контур замість жорсткого Border
+                    spreadRadius: 0,
+                  ),
+                ],
+              ),
+              child: ClipOval(
+                child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
+                    ? Image.asset(
+                  widget.profile.avatar!,
+                  width: 100,
+                  height: 100,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => _buildPlaceholder(statusColor),
+                )
+                    : _buildPlaceholder(statusColor),
+              ),
+            ),
+          ],
         ),
         const SizedBox(width: 16),
 
@@ -279,10 +343,13 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
     // Стан 1: Add Friend (Початковий варіант)
       case FriendStatus.addFriend:
         return GestureDetector(
-          onTap: () {
-            setState(() {
-              _currentStatus = FriendStatus.requestSent;
-            });
+          onTap: () async {
+            final success = await ApiService.sendFriendRequest(widget.profile.id);
+            if (success && mounted) {
+              setState(() {
+                _currentStatus = FriendStatus.requestSent;
+              });
+            }
           },
           child: SizedBox(
             width: 92,
@@ -306,10 +373,14 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
       case FriendStatus.requestSent:
         const requestColor = Color(0xFF8E8EA9);
         return GestureDetector(
-          onTap: () {
-            setState(() {
-              _currentStatus = FriendStatus.friends;
-            });
+          onTap: () async {
+            // Викликаємо API для видалення запиту
+            final success = await ApiService.removeFriend(widget.profile.id);
+            if (success && mounted) {
+              setState(() {
+                _currentStatus = FriendStatus.addFriend; // Повертаємо кнопку в Add Friend
+              });
+            }
           },
           child: SizedBox(
             width: 152,
@@ -318,11 +389,13 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Icon(Icons.person_add_alt_1, color: requestColor, size: 16),
+                const Icon(Icons.person_remove_alt_1, color: requestColor, size: 16), // Іконка видалення
                 const SizedBox(width: 5),
-                Text(
-                  'Friend request sent',
-                  style: TextStyle(color: requestColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14, height: 1.0),
+                Expanded( // Додаємо це
+                  child: Text(
+                    'Request sent/Cancel',
+                    style: TextStyle(color: requestColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14, height: 1.0),
+                    overflow: TextOverflow.ellipsis,)
                 ),
               ],
             ),

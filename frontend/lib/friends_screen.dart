@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'custom_widgets.dart'; // Звідси беремо FigmaArrowIcon
+import 'api_config.dart';
+import 'api_service.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 // =============================================================================
 // МОДЕЛЬ ДАНИХ ДЛЯ ЕКРАНУ
@@ -15,6 +19,7 @@ class FriendItem {
   final String gameName;
   final String platform;
   final String playStyle;
+  final int friendshipId;
 
   const FriendItem({
     required this.nickname,
@@ -27,8 +32,46 @@ class FriendItem {
     required this.gameName,
     required this.platform,
     required this.playStyle,
+    required this.friendshipId,
   });
+
+  factory FriendItem.fromJson(Map<String, dynamic> json) {
+    // Виводимо в консоль, щоб бачити, що прийшло (для впевненості)
+    print("DEBUG: Парсимо JSON: $json");
+
+    return FriendItem(
+      // ID ми беремо з самого об'єкта юзера, або якщо є friendshipId, то звідти
+      friendshipId: json['id'] ?? 0,
+
+      // Тепер поле nickname лежить прямо в корені JSON
+      nickname: json['nickname'] ?? 'Unknown',
+
+      // Аватарка (якщо є в базі)
+      avatarUrl: json['avatar'],
+
+      isOnline: json['is_online'] ?? false,
+      isVoiceOn: false, // Це поле треба буде додати в модель User на бекенді, якщо потрібно
+      isPro: json['is_pro'] ?? false,
+      isProOnly: false,
+      rating: (json['rating'] ?? 0.0).toDouble(),
+
+      // Ігри: беремо назву першої гри, якщо список не пустий
+      gameName: (json['games'] != null && (json['games'] as List).isNotEmpty)
+          ? json['games'][0]['game']['name']
+          : 'No games',
+
+      // Платформи: беремо першу
+      platform: (json['platforms'] != null && (json['platforms'] as List).isNotEmpty)
+          ? json['platforms'][0]['platform']
+          : 'Unknown',
+
+      playStyle: (json['styles'] != null && (json['styles'] as List).isNotEmpty)
+          ? json['styles'][0]['style']
+          : 'Default',
+    );
+  }
 }
+
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -41,6 +84,22 @@ class _FriendsScreenState extends State<FriendsScreen> {
   bool _isFriendsTab = true;
   bool _hasUnreadRequests = true; // Стан для керування кружечком нотифікації
 
+  Future<void> _loadFriends() async {
+    final response = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+      headers: await ApiService.getHeaders(),
+    );
+
+    if (!mounted) return; // Захист від помилки async gaps
+
+    if (response.statusCode == 200) {
+      List<dynamic> list = json.decode(response.body);
+      setState(() {
+        _friendsList = list.map((item) => FriendItem.fromJson(item)).toList();
+      });
+    }
+  }
+
   final Map<String, dynamic> myPreferences = {
     'games': ['Valorant', 'CS2'],
     'platforms': ['PC', 'PS5'],
@@ -48,48 +107,52 @@ class _FriendsScreenState extends State<FriendsScreen> {
   };
 
   // Список друзів
-  final List<FriendItem> _friendsList = [
-    const FriendItem(
-      nickname: 'NOVA',
-      avatarUrl: null,
-      isOnline: true,
-      isVoiceOn: true,
-      isPro: true,
-      isProOnly: true,
-      rating: 5.0,
-      gameName: 'Valorant',
-      platform: 'PC',
-      playStyle: 'Competitive',
-    ),
-    const FriendItem(
-      nickname: 'ShadowNinja',
-      avatarUrl: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?auto=format&fit=crop&w=100&q=80',
-      isOnline: false,
-      isVoiceOn: false,
-      isPro: true,
-      isProOnly: false,
-      rating: 4.8,
-      gameName: 'Apex Legends',
-      platform: 'PC',
-      playStyle: 'Competitive',
-    ),
-  ];
+  List<FriendItem> _friendsList = [];
 
   // Список запитів
-  final List<FriendItem> _requestsList = [
-    const FriendItem(
-      nickname: 'ShadowNinja123',
-      avatarUrl: null,
-      isOnline: true,
-      isVoiceOn: false,
-      isPro: true,
-      isProOnly: false,
-      rating: 4.2,
-      gameName: 'Valorant',
-      platform: 'PC',
-      playStyle: 'Competitive',
-    ),
-  ];
+  List<FriendItem> _requestsList = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();      // Запити
+    _loadFriends();   // Друзі
+  }
+
+  Future<void> _loadData() async {
+    // 1. Запит для ЗАПИТІВ (Requests)
+    final reqResponse = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/friends/requests'),
+      headers: await ApiService.getHeaders(),
+    );
+    print("DEBUG: Статус /friends/requests: ${reqResponse.statusCode}");
+    print("DEBUG: Тіло /friends/requests: ${reqResponse.body}");
+
+    // 2. Запит для ДРУЗІВ (Friends List)
+    final friendsResponse = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+      headers: await ApiService.getHeaders(),
+    );
+    print("DEBUG: Статус /friends/list: ${friendsResponse.statusCode}");
+    print("DEBUG: Тіло /friends/list: ${friendsResponse.body}");
+
+    // Перевірка, чи екран ще активний
+    if (!mounted) return;
+
+    if (reqResponse.statusCode == 200 && friendsResponse.statusCode == 200) {
+      setState(() {
+        // Парсимо запити
+        List<dynamic> reqList = json.decode(reqResponse.body);
+        _requestsList = reqList.map((item) => FriendItem.fromJson(item)).toList();
+
+        // Парсимо друзів
+        List<dynamic> frList = json.decode(friendsResponse.body);
+        _friendsList = frList.map((item) => FriendItem.fromJson(item)).toList();
+      });
+    } else {
+      print("Помилка завантаження: перевірте авторизацію або API");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -547,10 +610,15 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 // Кнопка Decline — видаляє запит
                 Expanded(
                   child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _requestsList.removeAt(index);
-                      });
+                    onTap: () async {
+                      // ТУТ МІСЦЕ ДЛЯ API ВИКЛИКУ
+                      final friendshipId = _requestsList[index].friendshipId;
+                      final success = await ApiService.acceptFriendRequest(friendshipId);
+
+                      if (success) {
+                        // Оновлюємо обидва списки після успішної дії
+                        _loadData();
+                      }
                     },
                     child: Container(
                       height: 27,
@@ -576,13 +644,31 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 // Кнопка Accept — переносить у список друзів
                 Expanded(
                   child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        // Видаляємо з реквестів та додаємо у друзі
-                        FriendItem accepted = _requestsList.removeAt(index);
-                        _friendsList.add(accepted);
-                        _isFriendsTab = true; // Відразу перемикаємо на вкладку друзів для результату
-                      });
+                    onTap: () async {
+                      // 1. Отримуємо ID запиту (припустимо, воно є у вашій моделі)
+                      final friendshipId = _requestsList[index].friendshipId;
+
+                      // 2. Викликаємо API
+                      final success = await ApiService.acceptFriendRequest(friendshipId);
+
+                      if (success && mounted) {
+                        // 3. Якщо сервер відповів 200 OK, оновлюємо UI
+                        setState(() {
+                          FriendItem accepted = _requestsList.removeAt(index);
+                          _friendsList.add(accepted);
+                          _isFriendsTab = true;
+                        });
+
+                        // Можна також додати повідомлення користувачу
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Friend request accepted!')),
+                        );
+                      } else {
+                        // Обробка помилки
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Failed to accept request')),
+                        );
+                      }
                     },
                     child: Container(
                       height: 27,

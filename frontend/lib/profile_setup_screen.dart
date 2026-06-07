@@ -10,6 +10,7 @@ import 'profile_setup_manager.dart'; // 1. ІМПОРТУЄМО МЕНЕДЖЕР
 import 'package:http/http.dart' as http;
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:convert';
+import 'api_config.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -48,7 +49,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     // 3. Відправляємо на бекенд
     try {
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:8000/register'),
+        Uri.parse('${ApiConfig.baseUrl}/register'),
         headers: {"Content-Type": "application/json"},
         body: _manager.toJson(),
       );
@@ -73,7 +74,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Future<void> _checkNicknameAvailability(String nickname) async {
     try {
       final response = await http.get(
-        Uri.parse('http://10.0.2.2:8000/check-nickname/$nickname'),
+        Uri.parse('${ApiConfig.baseUrl}/check-nickname/$nickname'),
       );
 
       if (response.statusCode == 200) {
@@ -98,7 +99,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 // Твій допоміжний метод для завантаження
   Future<String?> _uploadAvatarToServer(String filePath) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('http://10.0.2.2:8000/upload-avatar'));
+      var request = http.MultipartRequest('POST', Uri.parse('${ApiConfig.baseUrl}/upload-avatar'));
       request.files.add(await http.MultipartFile.fromPath('file', filePath));
       var res = await request.send();
 

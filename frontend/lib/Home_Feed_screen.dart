@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'notifications_overlay.dart';
 import 'custom_widgets.dart';
 import 'gamer_profile_screen.dart';
 import 'user_session.dart';
+import 'api_config.dart';
 
 class GamerProfile {
+  final int id;
   final String nickname;
   final String? avatar;
   final bool isPro;
@@ -17,6 +20,7 @@ class GamerProfile {
   final List<String> languages;
   final bool hasVoice; // Це voice_chat
   final bool isOnline;
+  final List<Map<String, String>> gamesWithDetails;
   final List<String> gamesList;
   final List<String> platformsList;
   final Map<String, String> connectedPlatforms;
@@ -24,16 +28,18 @@ class GamerProfile {
   final String password;
 
   GamerProfile({
+    required this.id,
     required this.nickname,
     this.avatar,
     required this.isPro,
-    required this.mainGame,
+    this.mainGame = 'None',
     required this.platform,
     required this.chatType,
     required this.tags,
     required this.languages,
     required this.hasVoice,
     required this.isOnline,
+    required this.gamesWithDetails,
     required this.gamesList,
     required this.platformsList,
     required this.connectedPlatforms,
@@ -67,26 +73,71 @@ class GamerProfile {
   }
 
   factory GamerProfile.fromJson(Map<String, dynamic> json) {
-    List<String> games = List<String>.from(json['games'] ?? []);
+    // 1. Парсимо ігри з урахуванням імені ТА картинки
+    final List<Map<String, String>> parsedGamesWithDetails = json['games'] is List
+        ? (json['games'] as List)
+        .where((item) => item is Map && item.containsKey('game') && item['game'] is Map)
+        .map((item) => {
+      'name': item['game']['name']?.toString() ?? 'Unknown',
+      'image': item['game']['image_url']?.toString() ?? '',
+    })
+        .toList()
+        : [];
+
+    // 2. Для зворотної сумісності (якщо десь у коді ще треба просто список назв)
+    final List<String> parsedGamesNames = parsedGamesWithDetails.map((g) => g['name']!).toList();
 
     return GamerProfile(
-      nickname: json['nickname'] ?? 'Unknown',
-      avatar: json['avatar'],
-      isPro: json['is_pro'] ?? false,
-      mainGame: games.isNotEmpty ? games[0] : 'None',
-      platform: (json['platforms'] as List).isNotEmpty ? json['platforms'][0] : 'None',
-      chatType: json['connected_accounts'] != null && (json['connected_accounts'] as Map).isNotEmpty
-          ? (json['connected_accounts'] as Map).keys.first
-          : 'None',
-      tags: List<String>.from(json['play_styles'] ?? []),
-      languages: List<String>.from(json['languages'] ?? []),
-      hasVoice: json['voice_chat'] ?? false,
-      isOnline: json['is_online'] ?? false,
-      gamesList: games,
-      platformsList: List<String>.from(json['platforms'] ?? []),
-      connectedPlatforms: Map<String, String>.from(json['connected_accounts'] ?? {}),
-      times: List<int>.from(json['times'] ?? []), // Зчитуємо масив годин
-      password: json['password'] ?? '',
+      id: json['id'],
+      nickname: json['nickname']?.toString() ?? 'Unknown',
+      avatar: json['avatar']?.toString(),
+      isPro: json['is_pro'] == true,
+
+      // Встановлюємо нову структуру
+      gamesWithDetails: parsedGamesWithDetails,
+      // gamesList залишається для сумісності (якщо метод сортування ще його потребує)
+      gamesList: parsedGamesNames,
+
+      mainGame: parsedGamesNames.isNotEmpty ? parsedGamesNames.first : 'None',
+
+      tags: json['styles'] is List
+          ? (json['styles'] as List).map((s) => s['style'].toString()).toList()
+          : [],
+
+      platform: 'Unknown',
+      chatType: 'Text',
+
+      languages: json['languages'] is List
+          ? (json['languages'] as List)
+          .where((item) => item is Map && item.containsKey('lang'))
+          .map((item) => item['lang'].toString())
+          .toList()
+          : [],
+
+      hasVoice: json['voice_chat'] == true,
+      isOnline: json['is_online'] == true,
+
+      platformsList: json['platforms'] is List
+          ? (json['platforms'] as List)
+          .where((item) => item is Map && item.containsKey('platform'))
+          .map((item) => item['platform'].toString())
+          .toList()
+          : [],
+
+      connectedPlatforms: json['accounts'] is List
+          ? Map.fromEntries((json['accounts'] as List)
+          .where((item) => item is Map && item.containsKey('service') && item.containsKey('username'))
+          .map((item) => MapEntry(item['service'].toString(), item['username'].toString())))
+          : {},
+
+      times: json['availability'] is List
+          ? (json['availability'] as List)
+          .where((item) => item is Map && item.containsKey('utc_hour'))
+          .map((item) => (item['utc_hour'] as num).toInt())
+          .toList()
+          : [],
+
+      password: '',
     );
   }
 
@@ -95,8 +146,12 @@ class GamerProfile {
     int score = 0;
 
     // 1. Ігри (ФУНДАМЕНТ)
-    var commonGames = gamesList.where((g) => myProfile.gamesList.contains(g)).toList();
-    if (commonGames.isEmpty) return -1; // Матч неможливий
+    var myGameNames = myProfile.gamesWithDetails.map((g) => g['name']).toSet();
+
+    var commonGames = gamesWithDetails.where((g) => myGameNames.contains(g['name'])).toList();
+
+    if (commonGames.isEmpty) return -1; // Матч неможливий, якщо немає спільних ігор
+
     score += (commonGames.length * 100);
 
     // 2. Онлайн статус
@@ -128,14 +183,77 @@ class GamerProfile {
     return score;
   }
 
-  String getBestMatchingGame(List<String> myGames) {
-    var common = gamesList.where((g) => myGames.contains(g)).toList();
-    return common.isNotEmpty ? common[0] : (gamesList.isNotEmpty ? gamesList[0] : 'None');
+  String getBestGame(List<String> myActiveFilters) {
+    // Тепер використовуємо gamesWithDetails (список Map)
+    if (gamesWithDetails.isEmpty) return 'No games';
+
+    // 1. Спочатку пробуємо знайти ту гру, яка збігається з активними фільтрами
+    for (var gameMap in gamesWithDetails) {
+      String gameName = gameMap['name'] ?? '';
+      if (myActiveFilters.contains(gameName)) {
+        return gameName;
+      }
+    }
+
+    // 2. Якщо збігів немає, повертаємо назву першої гри зі списку
+    return gamesWithDetails.first['name'] ?? 'No games';
   }
 
   int getExtraMatchesCount(List<String> myGames) {
-    var common = gamesList.where((g) => myGames.contains(g)).toList();
+    // Ми шукаємо назви ігор у списку Map (gamesWithDetails)
+    // myGames — це список рядків (назв ігор)
+    var common = gamesWithDetails
+        .where((gameMap) => myGames.contains(gameMap['name']))
+        .toList();
+
     return common.length > 1 ? common.length - 1 : 0;
+  }
+}
+
+class MatchProfile {
+  final int id;
+  final String nickname;
+  final String? avatar;
+  final bool isOnline;
+  final bool isPro;
+  final List<dynamic> games; // Список ігор
+  final List<String> languages;
+  final List<String> styles;
+  final List<String> platforms;
+  final List<int> availability;
+  final Map<String, String> connectedPlatforms;
+
+  MatchProfile({
+    required this.id,
+    required this.nickname,
+    this.avatar,
+    required this.isOnline,
+    required this.isPro,
+    required this.games,
+    required this.languages,
+    required this.styles,
+    required this.platforms,
+    required this.availability,
+    required this.connectedPlatforms,
+  });
+
+  factory MatchProfile.fromJson(Map<String, dynamic> json) {
+    return MatchProfile(
+      id: json['id'],
+      nickname: json['nickname'],
+      avatar: json['avatar'],
+      isOnline: json['is_online'] == true,
+      isPro: json['is_pro'] == true,
+      games: json['games'] ?? [],
+      languages: (json['languages'] as List).map((item) => item['lang'] as String).toList(),
+      styles: (json['styles'] as List).map((item) => item['style'] as String).toList(),
+      platforms: (json['platforms'] as List).map((item) => item['platform'] as String).toList(),
+      availability: (json['availability'] as List).map((item) => (item['utc_hour'] as num).toInt()).toList(),
+      connectedPlatforms: json['accounts'] != null
+          ? Map.fromEntries((json['accounts'] as List)
+          .map((item) => MapEntry(item['service'].toString(), item['username'].toString())))
+          : {},
+    );
   }
 }
 
@@ -147,15 +265,55 @@ class HomeFeedScreen extends StatefulWidget {
 }
 
 class _HomeFeedScreenState extends State<HomeFeedScreen> {
+  Future<void> _loadUserProfile() async {
+    try {
+      // 1. Отримуємо ID користувача, який ми зберегли при логіні
+      final userId = await UserSession.getUserId();
+      if (userId == null) return;
+
+      // 2. Робимо запит до вашого бекенду
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/users/$userId'), // або ваш ендпоінт для профілю
+        headers: {"Content-Type": "application/json"},
+      );
+
+      debugPrint('Статус відповіді: ${response.statusCode}');
+      debugPrint('Тіло відповіді: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final profile = GamerProfile.fromJson(data);
+        print("Профіль успішно створено! Нікнейм: ${profile.nickname}, Мови: ${profile.languages}");
+        // 3. Тепер безпечно ініціалізуємо профіль
+        setState(() {
+          UserSession().currentUser = GamerProfile.fromJson(data);
+          // Оновлюємо _myAvailableGames як список MAP, а не рядків
+          _myAvailableGames = (UserSession().currentUser?.gamesWithDetails ?? []).map((g) => {
+            'name': g['name'] ?? '',
+            'image': g['image'] ?? ''
+          }).toList();
+        });
+
+        _loadGamers(); // Завантажуємо стрічку після того, як отримали дані профілю
+      }
+    } catch (e) {
+      print("Помилка завантаження профілю: $e");
+    }
+  }
+
   List<GamerProfile> _sortGamersByMatch(List<GamerProfile> allGamers) {
-    // Отримуємо поточного користувача з сесії
     final me = UserSession().currentUser;
-    if (me == null) return allGamers; // Якщо юзер не авторизований, просто повертаємо список
-    // 1. Фільтруємо (лишаємо тільки тих, у кого є хоча б одна спільна гра)
+    if (me == null) return allGamers;
+
+    // Витягуємо список назв моїх ігор для швидкого порівняння
+    final myGameNames = me.gamesWithDetails.map((g) => g['name']).toSet();
+
+    // 1. Фільтруємо: шукаємо, чи є хоча б одна назва гри в списку ігор іншого гравця
     List<GamerProfile> matches = allGamers.where((g) =>
-        g.gamesList.any((game) => me.gamesList.contains(game))
+        g.gamesWithDetails.any((game) => myGameNames.contains(game['name']))
     ).toList();
-    // 2. Сортуємо за балами, які ми прописали в GamerProfile
+
+    // 2. Сортуємо
     matches.sort((a, b) {
       return b.calculateMatchScore(me).compareTo(a.calculateMatchScore(me));
     });
@@ -167,30 +325,63 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   List<GamerProfile> _loadedGamers = [];
 
   // 1. Додаємо список для ігор поточного користувача
-  List<String> _myAvailableGames = [];
+  List<Map<String, String>> _myAvailableGames = <Map<String, String>>[];
 
   @override
   void initState() {
     super.initState();
-    // 2. Ініціалізуємо ігри з сесії
-    _myAvailableGames = UserSession().currentUser?.gamesList ?? [];
-    _loadGamers();
+    _loadUserProfile();
   }
 
   Future<void> _loadGamers() async {
     try {
-      final String response = await rootBundle.loadString('assets/users.json');
-      final List<dynamic> data = json.decode(response);
+      final userId = await UserSession.getUserId();
+      if (userId == null) return;
 
-      // Створюємо список об'єктів
-      List<GamerProfile> loaded = data.map((json) => GamerProfile.fromJson(json)).toList();
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/find-matches?current_user_id=$userId'),
+        headers: {"Content-Type": "application/json"},
+      );
 
-      setState(() {
-        // Тепер замість простого присвоєння ми викликаємо наш метод сортування
-        _loadedGamers = _sortGamersByMatch(loaded);
-      });
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+
+        // 1. Спочатку парсимо дані в MatchProfile
+        List<MatchProfile> matches = data.map((json) => MatchProfile.fromJson(json)).toList();
+
+        // 2. Тепер перетворюємо їх у GamerProfile, використовуючи РЕАЛЬНІ дані з 'm'
+        setState(() {
+          _loadedGamers = matches.map((m) => GamerProfile(
+            id: m.id,
+            nickname: m.nickname,
+            avatar: m.avatar,
+            isPro: m.isPro,
+            isOnline: m.isOnline,
+            platform: m.platforms.isNotEmpty ? m.platforms.first : 'Unknown',
+            chatType: 'Text',
+            tags: m.styles,
+            languages: m.languages,
+            hasVoice: false,
+            connectedPlatforms: m.connectedPlatforms,
+
+            // ПЕРЕДАЄМО ОБИДВА ПОЛЯ:
+            // 1. Нова структура для картинок:
+            gamesWithDetails: m.games.map((g) => {
+              'name': g['game']['name'].toString(),
+              'image': g['game']['image_url'].toString(),
+            }).toList(),
+
+            // 2. Стара структура для фільтрів/сортування:
+            gamesList: m.games.map((g) => g['game']['name'].toString()).toList(),
+
+            platformsList: m.platforms,
+            times: m.availability,
+            password: '',
+          )).toList();
+        });
+      }
     } catch (e) {
-      debugPrint("Error loading JSON: $e");
+      debugPrint("Error loading matches: $e");
     }
   }
 
@@ -431,8 +622,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
   Widget _buildGamesDropdown() {
     // Використовуємо _myAvailableGames замість _userSavedGames
-    List<String> searchedGames = _myAvailableGames.where((gameName) {
-      return gameName.toLowerCase().contains(_searchController.text.toLowerCase());
+    List<Map<String, String>> searchedGames = _myAvailableGames.where((gameMap) {
+      return gameMap['name']!.toLowerCase().contains(_searchController.text.toLowerCase());
     }).toList();
 
     return Positioned(
@@ -473,55 +664,76 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 ),
                 itemCount: searchedGames.length,
                 itemBuilder: (context, index) {
-                  final gameName = searchedGames[index];
+                  // Припустимо, тепер у вас список Map
+                  final game = searchedGames[index];
+                  final String gameName = game['name']!;
+                  final String gameImage = game['image']!;
                   final isSelected = _temporarilySelectedGames.contains(gameName);
 
                   return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (isSelected) {
-                            _temporarilySelectedGames.remove(gameName);
-                          } else {
-                            _temporarilySelectedGames.add(gameName);
-                          }
-                        });
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isSelected ? const Color(0xFF00F5A0) : Colors.transparent,
-                            width: 1.5,
-                          ),
+                    onTap: () {
+                      setState(() {
+                        if (isSelected) {
+                          _temporarilySelectedGames.remove(gameName);
+                        } else {
+                          _temporarilySelectedGames.add(gameName);
+                        }
+                      });
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSelected ? const Color(0xFF00F5A0) : Colors.transparent,
+                          width: 1.5,
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Container(
-                            color: const Color(0xFF2B2B3B),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.gamepad, color: Colors.white30, size: 28),
-                                const SizedBox(height: 6),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                                  child: Text(
-                                    gameName,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: isSelected ? const Color(0xFF00F5A0) : Colors.white,
-                                      fontSize: 11,
-                                      fontFamily: 'Poppins',
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          color: const Color(0xFF2B2B3B),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // ТУТ МИ МІНЯЄМО ІКОНКУ НА КАРТИНКУ:
+                              Expanded(
+                                child: gameImage.isNotEmpty
+                                    ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Image.network(
+                                    gameImage,
+                                    width: double.infinity, // Розтягується на всю ширину контейнера
+                                    height: double.infinity,
+                                    fit: BoxFit.cover, // Заповнює область гарно
+                                    errorBuilder: (c, o, s) => const Icon(Icons.gamepad, color: Colors.white30, size: 28),
+                                  ),
+                                )
+                                    : const Icon(Icons.gamepad, color: Colors.white30, size: 28),
+                              ),
+
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Text(
+                                  gameName,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2, // Дозволяємо назві займати до 2 рядків
+                                  overflow: TextOverflow.ellipsis, // Якщо назва задовга — додасть "..."
+                                  style: TextStyle(
+                                    color: isSelected ? const Color(0xFF00F5A0) : Colors.white,
+                                    fontSize: 13,
+                                    fontFamily: 'Poppins',
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                // Genre прибрано, бо в списку тепер просто назви ігор (Strings)
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 4), // Невеличкий відступ знизу, щоб текст не "прилипав" до краю
+                            ],
                           ),
                         ),
-                      ));
+                      ),
+                    ),
+                  );
                 },
               ),
             ),
@@ -777,9 +989,8 @@ class GamerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final gameInfo = _getGameDisplayInfo(profile.gamesList, activeGames);
-    var common = profile.gamesList.where((g) => activeGames.contains(g)).toList();
-    String bestGame = common.isNotEmpty ? common[0] : (profile.gamesList.isNotEmpty ? profile.gamesList[0] : 'None');
+    final String bestGame = profile.getBestGame(activeGames);
+    final int extraCount = profile.getExtraMatchesCount(activeGames);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -906,18 +1117,16 @@ class GamerCard extends StatelessWidget {
                         const SizedBox(height: 7), // Трохи простору під ніком
 
                         Text(
-                          gameInfo['text'],
+                          bestGame,
                           style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                           maxLines: 1,
                         ),
 
-                        if (gameInfo['count'] > 2 || (gameInfo['count'] == 2 && gameInfo['isTruncated']))
+                        if (extraCount > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: Text(
-                              gameInfo['count'] > 2
-                                  ? '+${gameInfo['count'] - 2} more matches'
-                                  : '+1 more match',
+                              extraCount == 1 ? '+1 more match' : '+$extraCount more matches',
                               style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500),
                             ),
                           ),

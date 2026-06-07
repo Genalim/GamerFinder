@@ -5,6 +5,7 @@ import 'Home_Feed_screen.dart';
 import 'user_session.dart';
 import 'Main_navigation.dart';
 import 'api_config.dart';
+import 'package:http/http.dart' as http;
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -47,34 +48,51 @@ class _SignInScreenState extends State<SignInScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final String response = await rootBundle.loadString('assets/users.json');
-      final List<dynamic> data = json.decode(response);
-
-      final String inputNickname = _nicknameController.text.trim();
-      final String inputPass = _passwordController.text;
-
-      // Знаходимо мапу юзера
-      final userMap = data.firstWhere(
-            (u) => (u['nickname'] as String) == inputNickname && u['password'] == inputPass,
-        orElse: () => null,
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/login'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "nickname": _nicknameController.text.trim(),
+          "password": _passwordController.text,
+        }),
       );
 
-      if (userMap != null) {
-        // ЗБЕРІГАЄМО ЮЗЕРА В СЕСІЮ
-        UserSession().currentUser = GamerProfile.fromJson(userMap);
+      print("Статус відповіді: ${response.statusCode}");
+      print("Тіло відповіді: ${response.body}");
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        final userId = data['id'];
+        // ПРИПУСКАЮ, що токен приходить у полі 'access_token' або 'token'
+        // Перевірте логи в консолі, щоб дізнатися точне ім'я поля!
+        final token = data['access_token'];
+
+        if (userId == null) {
+          throw Exception("ID юзера відсутній");
+        }
+
+        // Зберігаємо ID
+        await UserSession.saveUserId(userId);
+
+        // ВАЖЛИВО: Зберігаємо токен!
+        if (token != null) {
+          UserSession.setToken(token);
+          print("Токен успішно збережено в UserSession");
+        }
 
         if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => const MainNavigationScreen()), // Переходимо на навігаційний контейнер
-                (route) => false, // Видаляємо всі попередні екрани (Login, Sign In тощо)
+          Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => MainNavigationScreen())
           );
         }
-      } else {
-        setState(() => _errorMessage = 'Invalid nickname or password');
+      }else {
+        setState(() => _errorMessage = 'Невірний нік або пароль (код: ${response.statusCode})');
       }
     } catch (e) {
-      setState(() => _errorMessage = 'System error. Try again later.');
+      print("ПОМИЛКА: $e");
+      setState(() => _errorMessage = 'Сталася помилка: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
