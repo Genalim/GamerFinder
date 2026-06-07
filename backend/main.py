@@ -1,14 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession as Session
 from contextlib import asynccontextmanager
+from typing import List
+
 
 from database import get_db, engine, Base
-from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles
-from schemas import UserCreate, LoginRequest, Token
+from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship
+from schemas import UserCreate, LoginRequest, Token, UserProfileResponse, FriendRequestCreate, FriendshipResponse
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -116,11 +116,23 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
 
     return {"status": "success", "user_id": new_user.id}
 
-@app.get("/users/{user_id}")
+@app.get("/users/{user_id}", response_model=UserProfileResponse) # <--- ВАЖЛИВО
 async def get_user_profile(user_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).options(selectinload(User.languages), selectinload(User.platforms), selectinload(User.availability), selectinload(User.accounts)).filter(User.id == user_id))
+    result = await db.execute(
+        select(User).options(
+            selectinload(User.languages),
+            selectinload(User.platforms),
+            selectinload(User.availability),
+            selectinload(User.accounts),
+            # Важливо: завантажуємо ігри та інформацію про самі ігри
+            selectinload(User.games).joinedload(UserGames.game),
+            selectinload(User.styles)
+        ).filter(User.id == user_id)
+    )
     user = result.scalars().first()
-    if not user: raise HTTPException(status_code=404, detail="Користувача не знайдено")
+    if not user:
+        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+
     return user
 
 @app.post("/login", response_model=Token)
@@ -130,7 +142,7 @@ async def login(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Невірний нікнейм або пароль")
     access_token = create_access_token(data={"sub": str(user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "id": user.id, "nickname": user.nickname}
 
 @app.get("/my-profile")
 async def get_my_profile(token: str = Header(...), db: AsyncSession = Depends(get_db)):
@@ -206,6 +218,160 @@ async def get_games(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Game))
     games = result.scalars().all()
     return [{"id": g.id, "name": g.name, "image_url": g.image_url, "genres": g.genres} for g in games]
+
+
+
+@app.get("/find-matches", response_model=List[UserProfileResponse])
+async def find_matches(current_user_id: int, db: AsyncSession = Depends(get_db)):
+    # 1. Спочатку завантажуємо поточного користувача з його іграми
+    result = await db.execute(
+        select(User).options(selectinload(User.games)).filter(User.id == current_user_id)
+    )
+    me = result.scalars().first()
+    if not me:
+        raise HTTPException(status_code=404, detail="Юзер не знайдений")
+
+    my_game_ids = [g.game_id for g in me.games]
+
+    # 2. Шукаємо інших користувачів, які грають у ці ігри
+    # Використовуємо distinct(), щоб не було дублікатів, якщо гравець грає в кілька наших ігор
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.languages),
+            selectinload(User.platforms),
+            selectinload(User.availability),
+            selectinload(User.accounts),
+            selectinload(User.games).joinedload(UserGames.game),
+            selectinload(User.styles)
+        )
+        .join(UserGames)
+        .filter(
+            and_(
+                UserGames.game_id.in_(my_game_ids),
+                User.id != current_user_id
+            )
+        )
+        .distinct()
+    )
+
+    matches = await db.execute(stmt)
+    return matches.scalars().all()
+
+#@app.post("/friends/request")
+#async def send_friend_request(friend_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    new_request = Friendship(user_id=current_user_id, friend_id=friend_id, status="pending")
+    db.add(new_request)
+    await db.commit()
+    return {"message": "Запит надіслано"}
+
+# 1. Відправити запит
+#@app.post("/friends/request/{friend_id}")
+#async def send_friend_request(friend_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    new_request = Friendship(user_id=current_user_id, friend_id=friend_id, status="pending")
+    db.add(new_request)
+    await db.commit()
+    return {"status": "pending"}
+
+# 2. Отримати статус дружби з конкретним юзером
+@app.get("/friends/status/{friend_id}")
+async def get_friend_status(friend_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    result = await db.execute(
+        select(Friendship).filter(
+            ((Friendship.user_id == current_user_id) & (Friendship.friend_id == friend_id)) |
+            ((Friendship.user_id == friend_id) & (Friendship.friend_id == current_user_id))
+        )
+    )
+    friendship = result.scalars().first()
+    if not friendship:
+        return {"status": "none"}
+    return {"status": friendship.status}
+
+@app.post("/friends/request", response_model=FriendshipResponse)
+async def send_friend_request(
+        request: FriendRequestCreate,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Перевірка, чи не існує вже такий запит
+    stmt = select(Friendship).filter(
+        ((Friendship.user_id == current_user_id) & (Friendship.friend_id == request.friend_id)) |
+        ((Friendship.user_id == request.friend_id) & (Friendship.friend_id == current_user_id))
+    )
+    result = await db.execute(stmt)
+    if result.scalars().first():
+        raise HTTPException(status_code=400, detail="Запит вже існує або ви вже друзі")
+
+    new_request = Friendship(user_id=current_user_id, friend_id=request.friend_id, status="pending")
+    db.add(new_request)
+    await db.commit()
+    await db.refresh(new_request)
+    return new_request
+
+@app.patch("/friends/accept/{friendship_id}")
+async def accept_friend_request(
+        friendship_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    result = await db.execute(select(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == current_user_id))
+    friendship = result.scalars().first()
+    if not friendship:
+        raise HTTPException(status_code=404, detail="Запит не знайдено")
+
+    friendship.status = "accepted"
+    await db.commit()
+    return {"message": "Дружбу підтверджено"}
+
+@app.get("/friends/list", response_model=List[UserProfileResponse])
+async def get_my_friends(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Додаємо selectinload, щоб завантажити дані для UserProfileResponse
+    stmt = select(User).options(
+        selectinload(User.languages),
+        selectinload(User.platforms),
+        selectinload(User.availability),
+        selectinload(User.accounts),
+        selectinload(User.games).joinedload(UserGames.game),
+        selectinload(User.styles)
+    ).join(Friendship, (User.id == Friendship.user_id) | (User.id == Friendship.friend_id)).filter(
+        ((Friendship.user_id == current_user_id) | (Friendship.friend_id == current_user_id)),
+        Friendship.status == "accepted",
+        User.id != current_user_id
+    ).distinct() # Distinct важливо, щоб не було дублів
+
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+# Отримання списку ВХІДНИХ запитів (pending)
+@app.get("/friends/requests", response_model=List[FriendshipResponse])
+async def get_friend_requests(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    stmt = select(Friendship).filter(Friendship.friend_id == current_user_id, Friendship.status == "pending")
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+# Видалення друга або скасування запиту
+@app.delete("/friends/remove/{friend_id}")
+async def remove_friend(
+        friend_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    stmt = select(Friendship).filter(
+        ((Friendship.user_id == current_user_id) & (Friendship.friend_id == friend_id)) |
+        ((Friendship.user_id == friend_id) & (Friendship.friend_id == current_user_id))
+    )
+    result = await db.execute(stmt)
+    friendship = result.scalars().first()
+    if friendship:
+        await db.delete(friendship)
+        await db.commit()
+    return {"message": "Видалено"}
 
 if __name__ == "__main__":
     import uvicorn

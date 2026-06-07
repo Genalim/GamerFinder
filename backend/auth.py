@@ -1,6 +1,8 @@
 import bcrypt
 from jose import jwt
 from datetime import datetime, timedelta
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Секретний ключ (його нікому не кажи!)
 SECRET_KEY = "my_super_secret_key_123"
@@ -26,13 +28,18 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user_id(token: str):
+security = HTTPBearer()
+
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    print(f"DEBUG: Сервер отримав токен (довжина {len(token)}): {token[:10]}...")
     try:
-        # Розшифровуємо токен
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
         if user_id is None:
-            return None
+            raise HTTPException(status_code=403, detail="Невалідний токен")
         return int(user_id)
-    except:
-        return None
+    except Exception:
+        import traceback
+        traceback.print_exc() # <--- ЦЕ ВИВЕДЕ ПРИЧИНУ 403
+        raise HTTPException(status_code=403, detail="Помилка авторизації")

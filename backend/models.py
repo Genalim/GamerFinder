@@ -23,6 +23,7 @@ class User(Base):
     languages = relationship("UserLanguages", backref="user")
     games = relationship("UserGames", backref="user")
     accounts = relationship("UserAccounts", backref="user")
+    styles = relationship("UserStyles", backref="user")
 
 class UserAvailability(Base):
     __tablename__ = "user_availability"
@@ -47,6 +48,7 @@ class UserGames(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     game_id = Column(Integer, ForeignKey("games.id"))
     style = Column(String)
+    game = relationship("Game")
 
 class UserAccounts(Base):
     __tablename__ = "user_accounts"
@@ -68,3 +70,12 @@ class UserStyles(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     style = Column(String)
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id")) # Хто відправив
+    friend_id = Column(Integer, ForeignKey("users.id")) # Кому відправили
+    status = Column(String, default="pending") # "pending", "accepted", "blocked"
+
