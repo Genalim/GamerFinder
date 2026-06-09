@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
-import 'Chose_your_platform.dart';
+import 'Choose_your_platform.dart';
 import 'profile_setup_manager.dart';
 import 'api_config.dart';
 

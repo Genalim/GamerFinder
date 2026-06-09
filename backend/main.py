@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, delete, update
 from sqlalchemy.orm import selectinload
 from contextlib import asynccontextmanager
 from typing import List
@@ -8,7 +8,7 @@ from typing import List
 
 from database import get_db, engine, Base
 from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship
-from schemas import UserCreate, LoginRequest, Token, UserProfileResponse, FriendRequestCreate, FriendshipResponse
+from schemas import UserCreate, LoginRequest, Token, UserProfileResponse, FriendRequestCreate, FriendshipResponse, BlockedUserResponse
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -274,26 +274,13 @@ async def find_matches(current_user_id: int, db: AsyncSession = Depends(get_db))
     return {"status": "pending"}
 
 # 2. Отримати статус дружби з конкретним юзером
-@app.get("/friends/status/{friend_id}")
-async def get_friend_status(friend_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
-    result = await db.execute(
-        select(Friendship).filter(
-            ((Friendship.user_id == current_user_id) & (Friendship.friend_id == friend_id)) |
-            ((Friendship.user_id == friend_id) & (Friendship.friend_id == current_user_id))
-        )
-    )
-    friendship = result.scalars().first()
-    if not friendship:
-        return {"status": "none"}
-    return {"status": friendship.status}
-
 @app.post("/friends/request", response_model=FriendshipResponse)
 async def send_friend_request(
         request: FriendRequestCreate,
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # Перевірка, чи не існує вже такий запит
+    # 1. Перевірка на існування (ваш код)
     stmt = select(Friendship).filter(
         ((Friendship.user_id == current_user_id) & (Friendship.friend_id == request.friend_id)) |
         ((Friendship.user_id == request.friend_id) & (Friendship.friend_id == current_user_id))
@@ -302,11 +289,26 @@ async def send_friend_request(
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Запит вже існує або ви вже друзі")
 
+    # 2. Створюємо запит
     new_request = Friendship(user_id=current_user_id, friend_id=request.friend_id, status="pending")
     db.add(new_request)
     await db.commit()
-    await db.refresh(new_request)
-    return new_request
+    # 3. Витягуємо об'єкт з БД з повним підвантаженням усіх зв'язків користувача
+    result = await db.execute(
+        select(Friendship)
+        .options(
+            selectinload(Friendship.user).selectinload(User.languages),
+            selectinload(Friendship.user).selectinload(User.platforms),
+            selectinload(Friendship.user).selectinload(User.accounts),
+            selectinload(Friendship.user).selectinload(User.availability),
+            selectinload(Friendship.user).selectinload(User.styles),
+            selectinload(Friendship.user).selectinload(User.games).selectinload(UserGames.game)
+        )
+        .filter(Friendship.id == new_request.id)
+    )
+    final_request = result.scalars().first()
+
+    return final_request
 
 @app.patch("/friends/accept/{friendship_id}")
 async def accept_friend_request(
@@ -322,6 +324,23 @@ async def accept_friend_request(
     friendship.status = "accepted"
     await db.commit()
     return {"message": "Дружбу підтверджено"}
+
+@app.delete("/friends/decline/{friendship_id}")
+async def decline_friend_request(
+        friendship_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Шукаємо запис
+    result = await db.execute(select(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == current_user_id))
+    friendship = result.scalars().first()
+    if not friendship:
+        raise HTTPException(status_code=404, detail="Запит не знайдено")
+
+    # Видаляємо запис
+    await db.delete(friendship)
+    await db.commit()
+    return {"message": "Запит відхилено"}
 
 @app.get("/friends/list", response_model=List[UserProfileResponse])
 async def get_my_friends(
@@ -351,9 +370,28 @@ async def get_friend_requests(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    stmt = select(Friendship).filter(Friendship.friend_id == current_user_id, Friendship.status == "pending")
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    result = await db.execute(
+        select(Friendship)
+        .options(
+            # Підвантажуємо юзера
+            selectinload(Friendship.user)
+            # Підвантажуємо вкладені колекції юзера
+            .selectinload(User.languages),
+            selectinload(Friendship.user).selectinload(User.platforms),
+            selectinload(Friendship.user).selectinload(User.accounts),
+            selectinload(Friendship.user).selectinload(User.availability),
+            selectinload(Friendship.user).selectinload(User.styles),
+            # А ось тут ми доповнюємо: підвантажуємо UserGames І їхню гру
+            selectinload(Friendship.user).selectinload(User.games)
+            .selectinload(UserGames.game) # <--- ОСЬ ЦЬОГО НЕ ВИСТАЧАЛО
+        )
+        .filter(
+            Friendship.friend_id == current_user_id,
+            Friendship.status == 'pending'
+        )
+    )
+    requests = result.scalars().all()
+    return requests
 
 # Видалення друга або скасування запиту
 @app.delete("/friends/remove/{friend_id}")
@@ -372,6 +410,107 @@ async def remove_friend(
         await db.delete(friendship)
         await db.commit()
     return {"message": "Видалено"}
+
+#Блокування друга.
+@app.patch("/friends/block/{friend_id}")
+async def block_friend(
+        friend_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Видаляємо будь-які попередні записи дружби чи запитів між цими двома користувачами
+    await db.execute(
+        delete(Friendship).filter(
+            ((Friendship.user_id == current_user_id) & (Friendship.friend_id == friend_id)) |
+            ((Friendship.user_id == friend_id) & (Friendship.friend_id == current_user_id))
+        )
+    )
+
+    # 2. Створюємо новий запис блокування, де ініціатор — ви
+    new_block = Friendship(user_id=current_user_id, friend_id=friend_id, status="blocked")
+    db.add(new_block)
+    await db.commit()
+
+    return {"message": "Користувача заблоковано"}
+
+@app.patch("/friends/unblock/{friend_id}")
+async def unblock_user(
+        friend_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Шукаємо запис, де саме ви були ініціатором блокування
+    result = await db.execute(
+        select(Friendship).filter(
+            (Friendship.user_id == current_user_id) &
+            (Friendship.friend_id == friend_id) &
+            (Friendship.status == "blocked")
+        )
+    )
+    friendship = result.scalars().first()
+
+    if not friendship:
+        raise HTTPException(status_code=403, detail="Дія заборонена або запис відсутній")
+
+    # Повертаємо статус "accepted" — це відновлює дружбу, але знімає блок
+    friendship.status = "accepted"
+    await db.commit()
+
+    return {"message": "Користувача розблоковано", "status": "accepted"}
+
+@app.get("/friends/blocked", response_model=List[BlockedUserResponse])
+async def get_blocked_friends(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    stmt = select(User).join(
+        Friendship, User.id == Friendship.friend_id
+    ).filter(
+        Friendship.user_id == current_user_id,
+        Friendship.status == "blocked"
+    ).distinct()
+
+    result = await db.execute(stmt)
+    users = result.scalars().all()
+
+    return users
+
+@app.get("/friends/status/{friend_id}")
+async def get_friend_status(
+        friend_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Шукаємо запис між вами (незалежно від того, хто перший кинув запит)
+    result = await db.execute(
+        select(Friendship).filter(
+            ((Friendship.user_id == current_user_id) & (Friendship.friend_id == friend_id)) |
+            ((Friendship.user_id == friend_id) & (Friendship.friend_id == current_user_id))
+        )
+    )
+    friendship = result.scalars().first()
+
+    if not friendship:
+        return {"status": "none"}
+
+    # Якщо статус "blocked"
+    if friendship.status == "blocked":
+        if friendship.user_id == current_user_id:
+            # Це ВАШ запис блокування (ви ініціатор)
+            return {"status": "blocked_by_me"}
+        else:
+            # Це ВАС заблокували (ініціатор інший гравець)
+            return {"status": "blocked_by_other"}
+
+    if friendship.status == "pending":
+        if friendship.user_id == current_user_id:
+            # Ви ініціатор запиту -> Вихідний запит
+            return {"status": "request_sent"}
+        else:
+            # Інший гравець ініціатор -> Вхідний запит
+            return {"status": "request_received"}
+
+    return {"status": friendship.status}
 
 if __name__ == "__main__":
     import uvicorn

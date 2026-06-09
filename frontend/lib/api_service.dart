@@ -64,4 +64,38 @@ class ApiService {
     return response.statusCode == 200;
   }
 
+  static Future<bool> blockUser(int friendId) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/friends/block/$friendId'),
+        headers: await getHeaders(),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Помилка блокування: $e");
+      return false;
+    }
+  }
+
+  static Future<bool> unblockUser(int friendId) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/friends/unblock/$friendId'),
+        headers: await getHeaders(),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Помилка при розблокуванні: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> declineFriendRequest(int friendshipId) async {
+    final response = await http.delete( // Використовуємо DELETE
+      Uri.parse('${ApiConfig.baseUrl}/friends/decline/$friendshipId'),
+      headers: await getHeaders(),
+    );
+    return response.statusCode == 200;
+  }
+
 }

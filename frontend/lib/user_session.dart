@@ -7,7 +7,15 @@ class UserSession {
   factory UserSession() => _instance;
   UserSession._internal();
 
+  // Додаємо гетер instance, щоб можна було писати UserSession.instance
+  static UserSession get instance => _instance;
+
   GamerProfile? currentUser;
+
+  static String? _token;
+
+  // Гетер для токена, який використовується в екземплярі (UserSession.instance.token)
+  String? get token => _token;
 
   // Метод збереження ID
   static Future<void> saveUserId(int userId) async {
@@ -28,7 +36,6 @@ class UserSession {
     _instance.currentUser = null;
   }
 
-  static String? _token;
 
   // Додайте цей метод:
   static Future<String?> getToken() async {

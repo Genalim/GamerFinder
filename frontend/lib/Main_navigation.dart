@@ -3,6 +3,7 @@ import 'Home_Feed_screen.dart';
 import 'custom_widgets.dart';
 import 'friends_screen.dart';
 import 'chats_screen.dart';
+import 'settings_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -14,37 +15,58 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
-  final List<Widget> _screens = [
-    const HomeFeedScreen(),
-    const FriendsScreen(),
-    const ChatsScreen(),
-    const Scaffold(
-      backgroundColor: Color(0xFF0F0F13),
-      body: Center(child: Text('Profile Screen', style: TextStyle(color: Colors.white))),
-    ),
-  ];
+  // 1. Ключ для доступу до методів FriendsScreen
+  final GlobalKey<State<FriendsScreen>> _friendsKey = GlobalKey();
+
+  // 2. Оголошуємо список як late (ініціалізуємо в initState)
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      const HomeFeedScreen(),
+      FriendsScreen(key: _friendsKey), // Тут ми передаємо наш ключ
+      const ChatsScreen(),
+      const SettingsScreen(),
+    ];
+  }
+
+  // Метод для зміни табів
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+
+    // Якщо користувач натиснув на FriendsScreen (індекс 1)
+    if (index == 1) {
+      final state = _friendsKey.currentState;
+      // Викликаємо метод оновлення, якщо він існує
+      if (state != null && state is dynamic) {
+        try {
+          (state as dynamic).refreshData();
+        } catch (e) {
+          debugPrint("Помилка оновлення списку: $e");
+        }
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // 1. Це не дасть всьому екрану підійматися при появі клавіатури
       resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF0F0F13),
 
-      // 2. Використовуємо body для контенту
+      // IndexedStack зберігає стан екранів, але ми їх "смикаємо" через refreshData
       body: IndexedStack(
         index: _selectedIndex,
         children: _screens,
       ),
 
-      // 3. Використовуємо bottomNavigationBar замість Stack
       bottomNavigationBar: NeonBottomNavigator(
         selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
+        onTap: _onItemTapped, // Використовуємо наш оновлений метод
       ),
     );
   }

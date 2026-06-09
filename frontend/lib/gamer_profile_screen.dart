@@ -9,8 +9,10 @@ import 'api_service.dart';
 enum FriendStatus {
   addFriend,
   requestSent,
+  requestReceived,
   friends,
-  blocked,
+  blockedByMe,    // Ви заблокували (бачите меню з Unblock / Remove)
+  blockedByOther,
 }
 
 class GamerProfileScreen extends StatefulWidget {
@@ -39,20 +41,25 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
     try {
       final status = await ApiService.getFriendStatus(widget.profile.id);
 
-      // Перевіряємо, чи ще актуальний цей віджет (щоб уникнути помилок після закриття)
       if (!mounted) return;
 
       setState(() {
-        if (status == "pending") {
+        if (status == "request_sent") { // Змінено з "pending"
           _currentStatus = FriendStatus.requestSent;
+        } else if (status == "request_received") { // Додано обробку
+          _currentStatus = FriendStatus.requestReceived;
         } else if (status == "accepted") {
           _currentStatus = FriendStatus.friends;
+        } else if (status == "blocked_by_me") {
+          _currentStatus = FriendStatus.blockedByMe;
+        } else if (status == "blocked_by_other") {
+          _currentStatus = FriendStatus.blockedByOther;
         } else {
           _currentStatus = FriendStatus.addFriend;
         }
       });
     } catch (e) {
-      print("Помилка при отриманні статусу: $e");
+      print("Помилка: $e");
     }
   }
 
@@ -340,15 +347,13 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   // МЕТОД ГЕНЕРАЦІЇ ДИНАМІЧНОЇ КНОПКИ ЗА ЦСС ТА СТАНАМИ
   Widget _buildDynamicFriendButton(Color accentColor) {
     switch (_currentStatus) {
-    // Стан 1: Add Friend (Початковий варіант)
+    // Стан 1: Add Friend
       case FriendStatus.addFriend:
         return GestureDetector(
           onTap: () async {
             final success = await ApiService.sendFriendRequest(widget.profile.id);
-            if (success && mounted) {
-              setState(() {
-                _currentStatus = FriendStatus.requestSent;
-              });
+            if (mounted) {
+              await _fetchStatus();
             }
           },
           child: SizedBox(
@@ -369,40 +374,61 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           ),
         );
 
-    // Стан 2: Friend request sent (Сіра, при кліку переходить у Friends)
+    // 2.1 Request Sent Варіант 2Ви відправили запит (можна скасувати, залишаємо ваш GestureDetector)
       case FriendStatus.requestSent:
         const requestColor = Color(0xFF8E8EA9);
         return GestureDetector(
           onTap: () async {
-            // Викликаємо API для видалення запиту
             final success = await ApiService.removeFriend(widget.profile.id);
             if (success && mounted) {
               setState(() {
-                _currentStatus = FriendStatus.addFriend; // Повертаємо кнопку в Add Friend
+                _currentStatus = FriendStatus.addFriend;
               });
             }
           },
-          child: SizedBox(
-            width: 152,
+          child: const SizedBox(
+            width: 220,
             height: 16,
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Icon(Icons.person_remove_alt_1, color: requestColor, size: 16), // Іконка видалення
-                const SizedBox(width: 5),
-                Expanded( // Додаємо це
+                Icon(Icons.person_remove_alt_1, color: requestColor, size: 16),
+                SizedBox(width: 5),
+                Expanded(
                   child: Text(
                     'Request sent/Cancel',
-                    style: TextStyle(color: requestColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14, height: 1.0),
-                    overflow: TextOverflow.ellipsis,)
+                    style: TextStyle(color: requestColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14),
+                  ),
                 ),
               ],
             ),
           ),
         );
 
-    // Стан 3: Friends (Зелена з галочкою + Три крапки праворуч для виклику меню опцій)
+    //2.2 Request Sent Варіант 2 Вам надіслали запит (сірий неклікабельний контейнер)
+      case FriendStatus.requestReceived:
+        const requestColor = Color(0xFF8E8EA9);
+        return GestureDetector(
+          child: const SizedBox(
+            width: 152,
+            height: 16,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.hourglass_empty, color: requestColor, size: 16),
+                SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Waiting for answer',
+                    style: TextStyle(color: requestColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+    // Стан 3: Friends
       case FriendStatus.friends:
         return Row(
           mainAxisSize: MainAxisSize.min,
@@ -424,14 +450,12 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            // Огортаємо три крапки в OverlayPortal для випадаючого меню
             OverlayPortal(
               controller: _overlayController,
               overlayChildBuilder: (context) {
                 return CompositedTransformFollower(
                   link: _layerLink,
                   showWhenUnlinked: false,
-                  // Складання зміщення меню (за CSS: left: 270px від екрану, top: 146px)
                   offset: const Offset(33, 2),
                   child: Align(
                     alignment: Alignment.topLeft,
@@ -448,7 +472,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                   child: Container(
                     width: 24,
                     height: 24,
-                    color: Colors.transparent, // Збільшує зону кліку
+                    color: Colors.transparent,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: List.generate(3, (index) => Container(
@@ -468,8 +492,8 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           ],
         );
 
-    // Стан 4: Стан коли юзера заблоковано (замість кнопок дружби)
-      case FriendStatus.blocked:
+    // Стан 4: Ви заблокували користувача
+      case FriendStatus.blockedByMe:
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -483,14 +507,12 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            // Огортаємо три крапки в такий самий OverlayPortal і LayerLink
             OverlayPortal(
               controller: _overlayController,
               overlayChildBuilder: (context) {
                 return CompositedTransformFollower(
                   link: _layerLink,
                   showWhenUnlinked: false,
-                  // Зсуваємо плашку трохи нижче (на 29 пікселів), щоб вона була на рівні top: 173px, як у CSS
                   offset: const Offset(33, 2),
                   child: Align(
                     alignment: Alignment.topLeft,
@@ -502,12 +524,12 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                 link: _layerLink,
                 child: GestureDetector(
                   onTap: () {
-                    _overlayController.toggle(); // Тепер воно ожило і відкриває меню!
+                    _overlayController.toggle();
                   },
                   child: Container(
                     width: 24,
                     height: 24,
-                    color: Colors.transparent, // Збільшує зону тача
+                    color: Colors.transparent,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: List.generate(3, (index) => Container(
@@ -522,6 +544,23 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                     ),
                   ),
                 ),
+              ),
+            ),
+          ],
+        );
+
+    // Стан 5: Вас заблокували
+      case FriendStatus.blockedByOther:
+        return const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'User unavailable',
+              style: TextStyle(
+                color: Color(0xFFFF4A4A),
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
               ),
             ),
           ],
@@ -546,11 +585,31 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           children: [
             // Опція 1: Remove Friend
             InkWell(
-              onTap: () {
+              onTap: () async {
+                // 1. Спочатку ховаємо меню
                 _overlayController.hide();
-                setState(() {
-                  _currentStatus = FriendStatus.addFriend;
-                });
+
+                // 2. Викликаємо API
+                final success = await ApiService.removeFriend(widget.profile.id);
+
+                // 3. Якщо успішно - оновлюємо UI
+                if (success && mounted) {
+                  setState(() {
+                    _currentStatus = FriendStatus.addFriend;
+                  });
+
+                  // Невелика індикація для користувача
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Friend removed successfully')),
+                  );
+                } else {
+                  // Обробка помилки, якщо щось пішло не так
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to remove friend')),
+                    );
+                  }
+                }
               },
               child: Container(
                 width: double.infinity,
@@ -558,26 +617,59 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                 child: const Text(
                   'Remove friend',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 10, height: 1.0),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w500,
+                      fontSize: 10,
+                      height: 1.0
+                  ),
                 ),
               ),
             ),
             const Divider(color: Color(0xFF2B2B3B), height: 1, thickness: 0.5),
             // Опція 2: Block User
             InkWell(
-              onTap: () {
+              onTap: () async {
+                // 1. Ховаємо меню
                 _overlayController.hide();
-                setState(() {
-                  _currentStatus = FriendStatus.blocked;
-                });
+
+                // 2. Викликаємо API для блокування
+                // Переконайтеся, що widget.profile.id існує у вашій моделі
+                final success = await ApiService.blockUser(widget.profile.id);
+
+                // 3. Якщо запит успішний, оновлюємо стан UI
+                if (success && mounted) {
+                  setState(() {
+                    _currentStatus = FriendStatus.blockedByMe;
+                  });
+
+                  // Додатковий фідбек для користувача
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('User has been blocked')),
+                  );
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to block user')),
+                    );
+                  }
+                }
               },
+              // Зберігаємо ваш дизайн контейнера
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                 child: const Text(
                   'Block user',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 10, height: 1.0),
+                  style: TextStyle(
+                      color: Colors.redAccent,
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w500,
+                      fontSize: 10,
+                      height: 1.0
+                  ),
                 ),
               ),
             ),
@@ -601,13 +693,22 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 1. Повністю видалити з друзів (навіть із блоку) -> скидає на Add Friend
+            // 1. Повністю видалити з друзів (навіть із блоку) -> Викликаємо API та скидаємо на Add Friend
             InkWell(
-              onTap: () {
+              onTap: () async {
                 _overlayController.hide();
-                setState(() {
-                  _currentStatus = FriendStatus.addFriend;
-                });
+
+                // ВИПРАВЛЕННЯ: Додаємо виклик API для видалення дружби/блокування
+                final success = await ApiService.removeFriend(widget.profile.id);
+
+                if (success && mounted) {
+                  setState(() {
+                    _currentStatus = FriendStatus.addFriend;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Статус успішно видалено')),
+                  );
+                }
               },
               child: Container(
                 width: double.infinity,
@@ -623,11 +724,27 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
 
             // 2. Просто розблокувати -> ПОВЕРТАЄ В СТАТУС ДРУЗІВ (Friends)
             InkWell(
-              onTap: () {
+              onTap: () async {
                 _overlayController.hide();
-                setState(() {
-                  _currentStatus = FriendStatus.friends; // ЗМІНИЛИ ТУТ СТАН
-                });
+
+                // Викликаємо новий бекенд-ендпоінт
+                final success = await ApiService.unblockUser(widget.profile.id);
+
+                if (success && mounted) {
+                  setState(() {
+                    _currentStatus = FriendStatus.friends; // Повертаємо статус друзів
+                  });
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Користувача розблоковано')),
+                  );
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Не вдалося розблокувати користувача')),
+                    );
+                  }
+                }
               },
               child: Container(
                 width: double.infinity,

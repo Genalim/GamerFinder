@@ -78,4 +78,6 @@ class Friendship(Base):
     user_id = Column(Integer, ForeignKey("users.id")) # Хто відправив
     friend_id = Column(Integer, ForeignKey("users.id")) # Кому відправили
     status = Column(String, default="pending") # "pending", "accepted", "blocked"
+    user = relationship("User", foreign_keys=[user_id])
+    friend = relationship("User", foreign_keys=[friend_id])
 

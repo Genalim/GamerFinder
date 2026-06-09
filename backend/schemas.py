@@ -119,10 +119,19 @@ class FriendshipResponse(BaseModel):
     id: int
     user_id: int
     friend_id: int
-    status: str  # "pending", "accepted", "blocked"
+    status: str
+    user: Optional[UserProfileResponse] = None # Додаємо це поле!
 
     class Config:
         from_attributes = True
 
 class FriendRequestCreate(BaseModel):
     friend_id: int
+
+class BlockedUserResponse(BaseModel):
+    id: int
+    nickname: str
+    avatar: Optional[str] = None
+
+    class Config:
+        orm_mode = True
