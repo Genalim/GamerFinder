@@ -103,6 +103,7 @@ class UserProfileResponse(BaseModel):
     is_pro: bool
     is_online: bool
     rating: int
+    voice_chat: bool
 
     # Вкладені дані з використанням створених вище схем
     games: List[UserGameResponse] = []
@@ -135,3 +136,13 @@ class BlockedUserResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+from pydantic import BaseModel, Field
+
+class RateUserRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5, description="Rate from 1 to 5")
+
+class PlaystylePreferenceRequest(BaseModel):
+    styles: List[str]
+    times: List[int]
+    voice_chat: bool

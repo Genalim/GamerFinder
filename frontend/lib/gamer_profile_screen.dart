@@ -31,6 +31,9 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   final _overlayController = OverlayPortalController();
   final _layerLink = LayerLink();
 
+  int _currentProfileRating = 0;
+  bool _hasRatedGamer = false;
+
   @override
   void initState() {
     super.initState();
@@ -39,7 +42,11 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
 
   Future<void> _fetchStatus() async {
     try {
+      print("DEBUG: Початок завантаження статусу та рейтингу...");
       final status = await ApiService.getFriendStatus(widget.profile.id);
+      print("DEBUG: Статус дружби отримано: $status");
+      final ratingData = await ApiService.getMyRating(widget.profile.id);
+      print("DEBUG: Рейтинг отримано: $ratingData");
 
       if (!mounted) return;
 
@@ -57,6 +64,9 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         } else {
           _currentStatus = FriendStatus.addFriend;
         }
+        _currentProfileRating = ratingData['rating'] ?? 0;
+        _hasRatedGamer = ratingData['is_rated'] ?? false;
+        print("DEBUG: setState успішно завершено.");
       });
     } catch (e) {
       print("Помилка: $e");
@@ -98,6 +108,9 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               // 1. ХЕДЕР: Аватарка, Статуси, Нікнейм та Інтерактивна кнопка дій
               _buildHeader(accentColor),
               const SizedBox(height: 24),
+
+              //Rating
+              _buildProfileRatingSection(),
 
               // 2. СПИСОК ІГОР (Games List)
               _buildSectionTitle('Games List:', child: const ProfileGamesIcon()),
@@ -698,16 +711,46 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               onTap: () async {
                 _overlayController.hide();
 
-                // ВИПРАВЛЕННЯ: Додаємо виклик API для видалення дружби/блокування
-                final success = await ApiService.removeFriend(widget.profile.id);
+                // Показуємо діалогове вікно підтвердження перед видаленням
+                final bool? confirmDelete = await showDialog<bool>(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      backgroundColor: const Color(0xFF181826),
+                      title: const Text(
+                        'Remove Friend',
+                        style: TextStyle(color: Colors.white, fontFamily: 'Inter'),
+                      ),
+                      content: const Text(
+                        'User will also be removed from Blocked. Remove?',
+                        style: TextStyle(color: Colors.grey, fontFamily: 'Inter'),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('No', style: TextStyle(color: Colors.white)),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Yes', style: TextStyle(color: Color(0xFF00F5A0))),
+                        ),
+                      ],
+                    );
+                  },
+                );
 
-                if (success && mounted) {
-                  setState(() {
-                    _currentStatus = FriendStatus.addFriend;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Статус успішно видалено')),
-                  );
+                // Викликаємо API для видалення дружби/блокування тільки якщо користувач натиснув Yes
+                if (confirmDelete == true) {
+                  final success = await ApiService.removeFriend(widget.profile.id);
+
+                  if (success && mounted) {
+                    setState(() {
+                      _currentStatus = FriendStatus.addFriend;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Статус успішно видалено')),
+                    );
+                  }
                 }
               },
               child: Container(
@@ -765,6 +808,54 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // === ОЦІНЮВАННЯ ПРОФІЛЮ ==
+  Widget _buildProfileRatingSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Please rate gamer:',
+          style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontFamily: 'Inter',
+              fontWeight: FontWeight.w500
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: List.generate(5, (index) {
+            return GestureDetector(
+              onTap: //_hasRatedGamer
+                  //? null
+                () async {
+                final success = await ApiService.rateUser(
+                    widget.profile.id,
+                    index + 1
+                );
+
+                if (success && mounted) {
+                  setState(() {
+                    _currentProfileRating = index + 1;
+                    _hasRatedGamer = true;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Оцінку успішно збережено')),
+                  );
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: FigmaRatingStar(isFilled: index < _currentProfileRating),
+              ),
+            );
+          }),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 

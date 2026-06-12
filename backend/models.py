@@ -81,3 +81,15 @@ class Friendship(Base):
     user = relationship("User", foreign_keys=[user_id])
     friend = relationship("User", foreign_keys=[friend_id])
 
+class UserRating(Base):
+    __tablename__ = "user_ratings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rater_id = Column(Integer, ForeignKey("users.id"), nullable=False) # Хто поставив оцінку
+    rated_user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # Кому поставили оцінку
+    rating = Column(Integer, nullable=False) # Значення (наприклад, від 1 до 5)
+
+    # Зв'язки (опціонально, за бажанням)
+    rater = relationship("User", foreign_keys=[rater_id])
+    rated_user = relationship("User", foreign_keys=[rated_user_id])
+

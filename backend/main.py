@@ -1,14 +1,13 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete, update
+from sqlalchemy import select, and_, delete, update, func
 from sqlalchemy.orm import selectinload
 from contextlib import asynccontextmanager
 from typing import List
 
 
 from database import get_db, engine, Base
-from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship
-from schemas import UserCreate, LoginRequest, Token, UserProfileResponse, FriendRequestCreate, FriendshipResponse, BlockedUserResponse
+from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -19,6 +18,18 @@ from fastapi.exceptions import RequestValidationError
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi import Depends
+
+from schemas import (
+    UserCreate,
+    LoginRequest,
+    Token,
+    UserProfileResponse,
+    FriendRequestCreate,
+    FriendshipResponse,
+    BlockedUserResponse,
+    RateUserRequest,
+    PlaystylePreferenceRequest
+)
 
 
 
@@ -116,8 +127,29 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
 
     return {"status": "success", "user_id": new_user.id}
 
+@app.get("/users/{user_id}/my-rating")
+async def get_my_rating_for_user(
+        user_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    print(f"DEBUG: Запит /users/{user_id}/my-rating від юзера {current_user_id}")
+    result = await db.execute(
+        select(UserRating.rating).filter(
+            UserRating.rater_id == current_user_id,
+            UserRating.rated_user_id == user_id
+        )
+    )
+    rating = result.scalar() or 0
+    return {"rating": rating, "is_rated": rating > 0}
+
 @app.get("/users/{user_id}", response_model=UserProfileResponse) # <--- ВАЖЛИВО
-async def get_user_profile(user_id: int, db: AsyncSession = Depends(get_db)):
+async def get_user_profile(
+        user_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    print(f"DEBUG: Запит /users/{user_id}/my-rating від юзера {current_user_id}")
     result = await db.execute(
         select(User).options(
             selectinload(User.languages),
@@ -131,7 +163,15 @@ async def get_user_profile(user_id: int, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalars().first()
     if not user:
-        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    personal_rating_res = await db.execute(
+        select(UserRating.rating).filter(
+            UserRating.rater_id == current_user_id, # Потрібно передати або отримати з токена
+            UserRating.rated_user_id == user_id
+        )
+    )
+    personal_rating = personal_rating_res.scalar() or 0
 
     return user
 
@@ -140,7 +180,7 @@ async def login(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).filter(User.nickname == login_data.nickname))
     user = result.scalars().first()
     if not user or not verify_password(login_data.password, user.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Невірний нікнейм або пароль")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong nickname or password")
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer", "id": user.id, "nickname": user.nickname}
 
@@ -149,7 +189,7 @@ async def get_my_profile(token: str = Header(...), db: AsyncSession = Depends(ge
     # 1. Отримуємо ID користувача з токена
     user_id = get_current_user_id(token)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Невірний або прострочений токен")
+        raise HTTPException(status_code=401, detail="Wrong or expired token")
 
     # 2. Робимо запит до БД
     result = await db.execute(
@@ -163,7 +203,7 @@ async def get_my_profile(token: str = Header(...), db: AsyncSession = Depends(ge
     user = result.scalars().first()
 
     if not user:
-        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+        raise HTTPException(status_code=404, detail="User not found")
 
     return user
 
@@ -229,7 +269,7 @@ async def find_matches(current_user_id: int, db: AsyncSession = Depends(get_db))
     )
     me = result.scalars().first()
     if not me:
-        raise HTTPException(status_code=404, detail="Юзер не знайдений")
+        raise HTTPException(status_code=404, detail="User not found")
 
     my_game_ids = [g.game_id for g in me.games]
 
@@ -287,7 +327,7 @@ async def send_friend_request(
     )
     result = await db.execute(stmt)
     if result.scalars().first():
-        raise HTTPException(status_code=400, detail="Запит вже існує або ви вже друзі")
+        raise HTTPException(status_code=400, detail="Request already exist or already friends")
 
     # 2. Створюємо запит
     new_request = Friendship(user_id=current_user_id, friend_id=request.friend_id, status="pending")
@@ -319,11 +359,11 @@ async def accept_friend_request(
     result = await db.execute(select(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == current_user_id))
     friendship = result.scalars().first()
     if not friendship:
-        raise HTTPException(status_code=404, detail="Запит не знайдено")
+        raise HTTPException(status_code=404, detail="Request not found")
 
     friendship.status = "accepted"
     await db.commit()
-    return {"message": "Дружбу підтверджено"}
+    return {"message": "Friendship accepted"}
 
 @app.delete("/friends/decline/{friendship_id}")
 async def decline_friend_request(
@@ -335,12 +375,12 @@ async def decline_friend_request(
     result = await db.execute(select(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == current_user_id))
     friendship = result.scalars().first()
     if not friendship:
-        raise HTTPException(status_code=404, detail="Запит не знайдено")
+        raise HTTPException(status_code=404, detail="Request not found")
 
     # Видаляємо запис
     await db.delete(friendship)
     await db.commit()
-    return {"message": "Запит відхилено"}
+    return {"message": "Request declined"}
 
 @app.get("/friends/list", response_model=List[UserProfileResponse])
 async def get_my_friends(
@@ -409,7 +449,7 @@ async def remove_friend(
     if friendship:
         await db.delete(friendship)
         await db.commit()
-    return {"message": "Видалено"}
+    return {"message": "Removed"}
 
 #Блокування друга.
 @app.patch("/friends/block/{friend_id}")
@@ -431,7 +471,7 @@ async def block_friend(
     db.add(new_block)
     await db.commit()
 
-    return {"message": "Користувача заблоковано"}
+    return {"message": "User is blocked"}
 
 @app.patch("/friends/unblock/{friend_id}")
 async def unblock_user(
@@ -450,13 +490,13 @@ async def unblock_user(
     friendship = result.scalars().first()
 
     if not friendship:
-        raise HTTPException(status_code=403, detail="Дія заборонена або запис відсутній")
+        raise HTTPException(status_code=403, detail="Action is denied or no info about user")
 
     # Повертаємо статус "accepted" — це відновлює дружбу, але знімає блок
     friendship.status = "accepted"
     await db.commit()
 
-    return {"message": "Користувача розблоковано", "status": "accepted"}
+    return {"message": "User is unnlocked", "status": "accepted"}
 
 @app.get("/friends/blocked", response_model=List[BlockedUserResponse])
 async def get_blocked_friends(
@@ -511,6 +551,152 @@ async def get_friend_status(
             return {"status": "request_received"}
 
     return {"status": friendship.status}
+
+@app.post("/users/{user_id}/rate")
+async def rate_user(
+        user_id: int,
+        data: RateUserRequest,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    if user_id == current_user_id:
+        raise HTTPException(status_code=400, detail="Ви не можете оцінювати власний профіль")
+
+    # 1. Перевіряємо, чи існує користувач, якого оцінюють
+    result = await db.execute(select(User).filter(User.id == user_id))
+    target_user = result.scalars().first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+
+    # 2. Шукаємо, чи залишав цей юзер оцінку раніше
+    rating_stmt = select(UserRating).filter(
+        UserRating.rater_id == current_user_id,
+        UserRating.rated_user_id == user_id
+    )
+    existing_rating_res = await db.execute(rating_stmt)
+    existing_rating = existing_rating_res.scalars().first()
+
+    if existing_rating:
+        # Оновлюємо існуючу оцінку
+        existing_rating.rating = data.rating
+    else:
+        # Створюємо нову оцінку
+        new_rating = UserRating(
+            rater_id=current_user_id,
+            rated_user_id=user_id,
+            rating=data.rating
+        )
+        db.add(new_rating)
+
+    await db.commit()
+
+    # 3. Перераховуємо середній рейтинг для користувача
+    avg_stmt = select(func.avg(UserRating.rating)).filter(UserRating.rated_user_id == user_id)
+    avg_result = await db.execute(avg_stmt)
+    avg_rating = avg_result.scalar() or 0
+
+    # Оновлюємо поле rating в таблиці users (округлюємо до цілого числа)
+    target_user.rating = int(round(avg_rating))
+    await db.commit()
+
+    return {
+        "status": "success",
+        "message": "Rate successfully saved",
+        "new_average_rating": target_user.rating
+    }
+
+@app.put("/users/{user_id}/languages")
+async def update_user_languages(user_id: int, langs: List[str], db: AsyncSession = Depends(get_db)):
+    # 1. Очищаємо старі мови для user_id
+    await db.execute(delete(UserLanguages).where(UserLanguages.user_id == user_id))
+    # 2. Додаємо нові
+    for lang in langs:
+        db.add(UserLanguages(user_id=user_id, lang=lang))
+    await db.commit()
+    return {"message": "Languages updated"}
+
+@app.put("/users/{user_id}/platforms")
+async def update_user_platforms(user_id: int, platforms: List[str], db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(UserPlatforms).where(UserPlatforms.user_id == user_id))
+    for p in platforms:
+        db.add(UserPlatforms(user_id=user_id, platform=p))
+    await db.commit()
+    return {"message": "Platforms updated"}
+
+@app.put("/users/{user_id}/games")
+async def update_user_games(user_id: int, game_ids: List[int], db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(UserGames).where(UserGames.user_id == user_id))
+    for g_id in game_ids:
+        # Приклад прив'язки гри (стиль за замовчуванням 'default')
+        db.add(UserGames(user_id=user_id, game_id=g_id, style="default"))
+    await db.commit()
+    return {"message": "Games updated"}
+
+@app.put("/users/{user_id}/playstyle-preferences")
+async def update_user_playstyle(
+        user_id: int,
+        data: PlaystylePreferenceRequest,
+        db: AsyncSession = Depends(get_db)
+):
+    # Шукаємо користувача
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+
+    # Оновлюємо налаштування голосового чату
+    user.voice_chat = data.voice_chat
+
+    # Очищаємо та додаємо нові стилі гри (таблиця user_styles)
+    await db.execute(delete(UserStyles).where(UserStyles.user_id == user_id))
+    for style_name in data.styles:
+        db.add(UserStyles(user_id=user_id, style=style_name))
+
+    # Очищаємо та додаємо години доступності (таблиця user_availability)
+    await db.execute(delete(UserAvailability).where(UserAvailability.user_id == user_id))
+    for hour in data.times:
+        db.add(UserAvailability(user_id=user_id, utc_hour=hour))
+
+    await db.commit()
+    return {"message": "Playstyle successfully updated"}
+
+
+@app.put("/users/{user_id}")
+async def update_user_profile(
+        user_id: int,
+        data: dict,
+        db: AsyncSession = Depends(get_db)
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+
+    # Оновлюємо базові поля
+    if "nickname" in data:
+        user.nickname = data["nickname"]
+    if "email" in data:
+        user.email = data["email"]
+
+    if data.get("password"):
+        user.password = get_password_hash(data["password"])
+
+    if "avatar" in data:
+        user.avatar = data["avatar"]
+
+    # === ДОДАЄМО ОБРОБКУ ПЛАТФОРМ ===
+    if "connected_accounts" in data:
+        # 1. Видаляємо старі підключені платформи з бази
+        await db.execute(delete(UserAccounts).where(UserAccounts.user_id == user_id))
+
+        # 2. Записуємо нові платформи, які прийшли з _platformControllers
+        for service, username in data["connected_accounts"].items():
+            if username:
+                db.add(UserAccounts(user_id=user_id, service=service, username=username))
+
+    await db.commit()
+    await db.refresh(user)
+
+    return user
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,34 +1,115 @@
 import 'package:flutter/material.dart';
-import 'profile_setup_screen.dart';
-import 'Game_Selection.dart';
-import 'Language_Selection_screen.dart';
-import 'Choose_your_playstyle.dart';
-import 'Choose_your_platform.dart';
+import 'sign_in_screen.dart';
+import 'user_session.dart';
+import 'edit_profile_setup_screen.dart';
+import 'edit_game_selection_screen.dart';
+import 'edit_language_selection_screen.dart';
+import 'edit_play_style_screen.dart';
+import 'edit_platform_selection_screen.dart';
+import 'Home_Feed_screen.dart';
+import 'custom_widgets.dart';
+import 'edit_rating_screen.dart';
+import 'package:http/http.dart' as http;
+import 'api_config.dart';
+import 'dart:convert';
 
-// Імпортуйте ваші реальні екрани (LoginScreen, EditProfileScreen, Game_Selection тощо)
-// import 'login_screen.dart';
-// import 'edit_profile_screen.dart';
-
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
-  // Метод для генерації аватара за вашим CSS
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  GamerProfile? _userProfile;
+
+  void initState() {
+    super.initState();
+    _fetchAndLoadProfile(); // Оновлено: завантажуємо профіль з сервера при старті
+  }
+
+  Future<void> _fetchAndLoadProfile() async {
+    try {
+      final userId = await UserSession.getUserId();
+      final token = await UserSession.getToken();
+      if (userId == null) {
+        _loadProfileData();
+        return;
+      }
+
+      final response = await http.get(
+        Uri.parse("${ApiConfig.baseUrl}/users/$userId"),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          UserSession().currentUser = GamerProfile.fromJson(data);
+          _userProfile = UserSession().currentUser;
+        });
+      } else {
+        _loadProfileData();
+      }
+    } catch (e) {
+      debugPrint("Помилка завантаження профілю: $e");
+      _loadProfileData();
+    }
+  }
+
+  // Оновлюємо профіль при кожному відкритті/фокусі на екрані
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadProfileData();
+  }
+
+  void _loadProfileData() {
+    setState(() {
+      _userProfile = UserSession().currentUser;
+    });
+  }
+
+  void _loadUser() {
+    setState(() {
+      _userProfile = UserSession().currentUser;
+    });
+  }
+
+  // Метод для генерації аватара
   Widget _buildAvatar(String nickname, String? imageUrl) {
     if (imageUrl != null && imageUrl.isNotEmpty) {
-      return Container(
-        width: 100,
-        height: 100,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFF00F5A0), width: 1),
-          image: DecorationImage(
-            image: NetworkImage(imageUrl),
-            fit: BoxFit.cover,
+      if (imageUrl.startsWith('assets/')) {
+        return Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF00F5A0), width: 1),
+            image: DecorationImage(
+              image: AssetImage(imageUrl),
+              fit: BoxFit.cover,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        return Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF00F5A0), width: 1),
+            image: DecorationImage(
+              image: NetworkImage(imageUrl),
+              fit: BoxFit.cover,
+            ),
+          ),
+        );
+      }
     } else {
-      // Якщо картинки немає, рендеримо літеру за CSS (Love Light)
       String firstLetter = nickname.isNotEmpty ? nickname[0].toUpperCase() : '';
       return Container(
         width: 64,
@@ -36,8 +117,8 @@ class SettingsScreen extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF181826),
           shape: BoxShape.circle,
-          boxShadow: [
-            const BoxShadow(
+          boxShadow: const [
+            BoxShadow(
               color: Color(0xFF00F5A0),
               blurRadius: 8,
               spreadRadius: 0,
@@ -53,7 +134,7 @@ class SettingsScreen extends StatelessWidget {
               fontStyle: FontStyle.normal,
               fontWeight: FontWeight.w400,
               fontSize: 30,
-              height: 27 / 30, // 0.9 відповідно до css line-height 27px при 30px size
+              height: 27 / 30,
               color: Color(0xFF00F5A0),
             ),
           ),
@@ -68,9 +149,13 @@ class SettingsScreen extends StatelessWidget {
     const accentColor = Color(0xFF00F5A0);
     const cardColor = Color(0xFF181826);
 
-    // Зразок змінних (замініть на реальні дані з вашого UserSession)
-    final String currentNickname = 'gamer_nickname';
-    final String? currentAvatarUrl = null; // наприклад, посилання на картинку з бекенду
+    final user = _userProfile ?? UserSession().currentUser;
+    final String currentNickname = user?.nickname ?? 'Gamer';
+    final String? currentAvatarUrl = user?.avatar;
+    final String currentEmail = user?.email ?? 'user_email@gmail.com';
+
+    // Округлення рейтингу до 1 десятого знаку (наприклад 3.4 / 5.0)
+    final double displayRating = (user?.rating?.toDouble() ?? 0.0);
 
     return Scaffold(
       backgroundColor: primaryColor,
@@ -78,7 +163,7 @@ class SettingsScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        automaticallyImplyLeading: false, // ПРИБРАНО СТРІЛКУ НАЗАД З ВЕРХУ
+        automaticallyImplyLeading: false,
         title: const Text(
           'Settings & Profile',
           style: TextStyle(color: Colors.white, fontFamily: 'Poppins', fontWeight: FontWeight.w500),
@@ -87,7 +172,6 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          // 0. Секція: Інформація профілю (Логін, пошта, аватар)
           const SectionHeader(title: 'User Account Info'),
           Card(
             color: cardColor,
@@ -99,13 +183,13 @@ class SettingsScreen extends StatelessWidget {
                   _buildAvatar(currentNickname, currentAvatarUrl),
                   const SizedBox(height: 12),
                   Text(
-                    currentNickname, // Ваш логін з сесії
+                    currentNickname,
                     style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Poppins'),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'user_email@gmail.com', // Ваша пошта
-                    style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 14, fontFamily: 'Inter'),
+                  Text(
+                    currentEmail,
+                    style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 14, fontFamily: 'Inter'),
                   ),
                 ],
               ),
@@ -113,7 +197,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // 1. Секція: Редагування профілю (Таби онбордингу + профіль сеттінг)
           const SectionHeader(title: 'Profile Setup & Onboarding'),
           Card(
             color: cardColor,
@@ -124,45 +207,59 @@ class SettingsScreen extends StatelessWidget {
                   leading: const Icon(Icons.person_outline, color: accentColor),
                   title: const Text('Profile Settings', style: TextStyle(color: Colors.white)),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
-                  onTap: () {
-                    // Перехід на екран зміни пошти, нікнейму чи паролю
-                    // Navigator.push(context, MaterialPageRoute(builder: (context) => const EditProfileScreen()));
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => EditProfileScreen()),
+                    );
+                    // Оновлюємо дані, коли користувач повертається назад на сеттінги
+                    _loadProfileData();
                   },
                 ),
                 const Divider(color: Color(0xFF2B2B3B), height: 1),
                 ListTile(
-                  leading: const Icon(Icons.games, color: accentColor),
+                  leading: const ProfileGamesIcon(),
                   title: const Text('Game Selection', style: TextStyle(color: Colors.white)),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
                   onTap: () {
-                    // Перехід на екран вибору ігор
+                    Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => const EditGameSelectionScreen()));
                   },
                 ),
                 const Divider(color: Color(0xFF2B2B3B), height: 1),
                 ListTile(
-                  leading: const Icon(Icons.devices, color: accentColor),
+                  leading: const ProfilePlatformsIcon(),
                   title: const Text('Platform Selection', style: TextStyle(color: Colors.white)),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
                   onTap: () {
-                    // Перехід на екран платформ
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditPlatformSelectionScreen()),
+                    );
                   },
                 ),
                 const Divider(color: Color(0xFF2B2B3B), height: 1),
                 ListTile(
-                  leading: const Icon(Icons.tune, color: accentColor),
+                  leading: const ProfilePlayStyleIcon(),
                   title: const Text('Play Style', style: TextStyle(color: Colors.white)),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
                   onTap: () {
-                    // Перехід на стиль гри та мови
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditPlayStyleScreen()),
+                    );
                   },
                 ),
                 const Divider(color: Color(0xFF2B2B3B), height: 1),
                 ListTile(
-                  leading: const Icon(Icons.tune, color: accentColor),
+                  leading: const Icon(Icons.language, color: accentColor),
                   title: const Text('Language Selection', style: TextStyle(color: Colors.white)),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
                   onTap: () {
-                    // Перехід на стиль гри та мови
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditLanguageSelectionScreen()),
+                    );
                   },
                 ),
               ],
@@ -170,21 +267,37 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // 2. Секція: Рейтинг та статистика
           const SectionHeader(title: 'Stats & Reputation'),
           Card(
             color: cardColor,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: const ListTile(
-              leading: Icon(Icons.star, color: Colors.amber),
-              title: Text('My Global Rating', style: TextStyle(color: Colors.white)),
-              trailing: Text('4.92 / 5.0', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
-              subtitle: Text('Based on community evaluations', style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 12)),
+            child: ListTile(
+              leading: const FigmaRatingStar(isFilled: true),
+              title: const Text('My Global Rating', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Based on community evaluations', style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 12)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Додано кастомну зірочку перед цифрою
+                  const SizedBox(width: 6),
+                  Text(
+                    '${displayRating.toStringAsFixed(1)} / 5.0',
+                    style: const TextStyle(color: accentColor, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
+                ],
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EditRatingScreen()),
+                );
+              },
             ),
           ),
           const SizedBox(height: 20),
 
-          // 3. Історія (History)
           const SectionHeader(title: 'Activity Ledger'),
           Card(
             color: cardColor,
@@ -193,14 +306,11 @@ class SettingsScreen extends StatelessWidget {
               leading: const Icon(Icons.history, color: accentColor),
               title: const Text('History (Matches & Notifications)', style: TextStyle(color: Colors.white)),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
-              onTap: () {
-                // Перехід в історію, де логи не зникають, але їх можна видалити
-              },
+              onTap: () {},
             ),
           ),
           const SizedBox(height: 20),
 
-          // 4. Налаштування чатів та сповіщень
           const SectionHeader(title: 'App Preferences'),
           Card(
             color: cardColor,
@@ -225,7 +335,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // 5. Підписка PRO
           const SectionHeader(title: 'Subscription'),
           Card(
             color: const Color(0xFF0066FF).withOpacity(0.15),
@@ -238,26 +347,22 @@ class SettingsScreen extends StatelessWidget {
               title: const Text('GamerFinder PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               subtitle: const Text('Manage your premium status', style: TextStyle(color: Colors.white60)),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
-              onTap: () {
-                // Екран PRO підписки
-              },
+              onTap: () {},
             ),
           ),
           const SizedBox(height: 20),
 
-          // 6. Аккаунт (Вихід та видалення)
           const SectionHeader(title: 'Account Management'),
           ListTile(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Color(0xFF2B2B3B))),
             leading: const Icon(Icons.logout, color: Colors.white),
             title: const Text('Log out', style: TextStyle(color: Colors.white)),
             onTap: () async {
-              // РЕАЛЬНА ЛОГІКА ВИХОДУ (Очищення сесії та перенаправлення)
-              // await UserSession.instance.logout();
-              // Navigator.of(context).pushAndRemoveUntil(
-              //   MaterialPageRoute(builder: (context) => const LoginScreen()),
-              //   (route) => false,
-              // );
+              await UserSession.logout();
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const SignInScreen()),
+                    (route) => false,
+              );
             },
           ),
           const SizedBox(height: 12),
@@ -266,9 +371,7 @@ class SettingsScreen extends StatelessWidget {
             tileColor: const Color(0xFFFF4A4A).withOpacity(0.15),
             leading: const Icon(Icons.delete_forever, color: Color(0xFFFF4A4A)),
             title: const Text('Delete Account', style: TextStyle(color: Color(0xFFFF4A4A))),
-            onTap: () {
-              // Логіка видалення аккаунту
-            },
+            onTap: () {},
           ),
         ],
       ),
@@ -276,7 +379,6 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-// Допоміжний віджет заголовків секцій
 class SectionHeader extends StatelessWidget {
   final String title;
   const SectionHeader({super.key, required this.title});

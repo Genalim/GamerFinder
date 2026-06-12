@@ -11,6 +11,7 @@ import 'api_config.dart';
 class GamerProfile {
   final int id;
   final String nickname;
+  final String email;
   final String? avatar;
   final bool isPro;
   final String mainGame;
@@ -25,11 +26,13 @@ class GamerProfile {
   final List<String> platformsList;
   final Map<String, String> connectedPlatforms;
   final List<int> times; // ДОДАНО: для матчингу
+  final int rating;
   final String password;
 
   GamerProfile({
     required this.id,
     required this.nickname,
+    required this.email,
     this.avatar,
     required this.isPro,
     this.mainGame = 'None',
@@ -44,6 +47,7 @@ class GamerProfile {
     required this.platformsList,
     required this.connectedPlatforms,
     required this.times, // ДОДАНО в конструктор
+    this.rating = 0,
     required this.password,
   });
   ///Перероблюємо години у назви частини доби для відображення.
@@ -90,6 +94,7 @@ class GamerProfile {
     return GamerProfile(
       id: json['id'],
       nickname: json['nickname']?.toString() ?? 'Unknown',
+      email: json['email']?.toString() ?? '',
       avatar: json['avatar']?.toString(),
       isPro: json['is_pro'] == true,
 
@@ -136,7 +141,7 @@ class GamerProfile {
           .map((item) => (item['utc_hour'] as num).toInt())
           .toList()
           : [],
-
+      rating: json['rating'] != null ? (json['rating'] as num).toInt() : 0,
       password: '',
     );
   }
@@ -271,10 +276,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
       final userId = await UserSession.getUserId();
       if (userId == null) return;
 
-      // 2. Робимо запит до вашого бекенду
+      // 2. Отримуємо збережений токен (припустімо, що у вас є метод getToken, за аналогією до getUserId)
+      final token = await UserSession.getToken();
+
+      // 3. Робимо запит до бекенду з додаванням заголовка Authorization
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/users/$userId'), // або ваш ендпоінт для профілю
-        headers: {"Content-Type": "application/json"},
+        Uri.parse('${ApiConfig.baseUrl}/users/$userId'),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
       );
 
       debugPrint('Статус відповіді: ${response.statusCode}');
@@ -284,17 +295,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
         final data = json.decode(response.body);
         final profile = GamerProfile.fromJson(data);
         print("Профіль успішно створено! Нікнейм: ${profile.nickname}, Мови: ${profile.languages}");
-        // 3. Тепер безпечно ініціалізуємо профіль
+
         setState(() {
           UserSession().currentUser = GamerProfile.fromJson(data);
-          // Оновлюємо _myAvailableGames як список MAP, а не рядків
           _myAvailableGames = (UserSession().currentUser?.gamesWithDetails ?? []).map((g) => {
             'name': g['name'] ?? '',
             'image': g['image'] ?? ''
           }).toList();
         });
 
-        _loadGamers(); // Завантажуємо стрічку після того, як отримали дані профілю
+        _loadGamers(); // Завантажуємо стрічку після отримання профілю
       }
     } catch (e) {
       print("Помилка завантаження профілю: $e");
@@ -323,6 +333,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   bool _isNotificationsOpen = false;
   bool _hasUnreadNotifications = true;
   List<GamerProfile> _loadedGamers = [];
+  bool _isLoadingGamers = true;
 
   // 1. Додаємо список для ігор поточного користувача
   List<Map<String, String>> _myAvailableGames = <Map<String, String>>[];
@@ -334,6 +345,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   }
 
   Future<void> _loadGamers() async {
+    setState(() => _isLoadingGamers = true);
     try {
       final userId = await UserSession.getUserId();
       if (userId == null) return;
@@ -354,6 +366,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
           _loadedGamers = matches.map((m) => GamerProfile(
             id: m.id,
             nickname: m.nickname,
+            email: '',
             avatar: m.avatar,
             isPro: m.isPro,
             isOnline: m.isOnline,
@@ -376,12 +389,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
             platformsList: m.platforms,
             times: m.availability,
+            rating: 0,
             password: '',
           )).toList();
         });
       }
     } catch (e) {
       debugPrint("Error loading matches: $e");
+    } finally {
+      setState(() => _isLoadingGamers = false);
     }
   }
 
@@ -445,34 +461,70 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 const SizedBox(height: 8),
                 _buildToggleAndRatingSection(),
                 const SizedBox(height: 8),
-                const Center(
+                Center(
                   child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 10),
-                    child: Text(
-                      'Your matches',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontFamily: 'Poppins',
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'Your matches',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Poppins',
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        GestureDetector(
+                          onTap: () {
+                            // Викликаємо оновлення профілю та метчів
+                            _loadUserProfile();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF181826), // Колір карток
+                              shape: BoxShape.circle,
+                              border: Border.all(color: accentColor, width: 1.5),
+
+                            ),
+                            child: Icon(
+                              Icons.refresh,
+                              color: accentColor,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
                 Expanded(
-                  child: _loadedGamers.isEmpty
+                  child: _isLoadingGamers
+                      ? const Center(child: CircularProgressIndicator(color: accentColor))
+                      : _loadedGamers.isEmpty
                       ? const Center(
-                    child: CircularProgressIndicator(color: accentColor),
+                    child: Text(
+                      'No matches for your games',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF8E8EA9),
+                        fontFamily: 'Poppins',
+                        fontSize: 16,
+                      ),
+                    ),
                   )
-                      : ListView.builder(
+                      : ListView.builder( // <--- Тепер це звичайний ListView, без свайпу
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                     itemCount: filteredGamers.length,
-                    itemBuilder: (context, index) { // context доступний тут!
+                    itemBuilder: (context, index) {
                       return GamerCard(
                         profile: filteredGamers[index],
                         accentColor: accentColor,
                         activeGames: _confirmedActiveGames,
-                        parentContext: context, // Передаємо сюди
+                        parentContext: context,
                       );
                     },
                   ),

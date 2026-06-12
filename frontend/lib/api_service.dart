@@ -98,4 +98,36 @@ class ApiService {
     return response.statusCode == 200;
   }
 
+  // === НОВИЙ МЕТОД: Оцінювання користувача ===
+  static Future<bool> rateUser(int userId, int ratingValue) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/users/$userId/rate'),
+        headers: await getHeaders(),
+        body: json.encode({"rating": ratingValue}),
+      );
+
+      print("DEBUG: Статус відповіді на оцінку: ${response.statusCode}");
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Помилка при оцінюванні користувача: $e');
+      return false;
+    }
+  }
+  // === Отримання оцінки користувача він нас самих (зірочки) ===
+  static Future<Map<String, dynamic>> getMyRating(int userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/users/$userId/my-rating'),
+        headers: await getHeaders(),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+    } catch (e) {
+      print('Помилка при отриманні рейтингу: $e');
+    }
+    return {"rating": 0, "is_rated": false};
+  }
+
 }
