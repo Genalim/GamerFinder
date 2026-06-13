@@ -60,6 +60,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _deleteAccount() async {
+    final token = await UserSession.getToken();
+    final userId = await UserSession.getUserId();
+
+    try {
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/users/me'),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        // 1. Очищаємо сесію
+        await UserSession.logout();
+
+        // 2. Перекидаємо на екран входу
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const SignInScreen()),
+                (route) => false,
+          );
+        }
+      } else {
+        // Помилка від сервера
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to delete account")),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error: $e");
+    }
+  }
+
   // Оновлюємо профіль при кожному відкритті/фокусі на екрані
   @override
   void didChangeDependencies() {
@@ -371,7 +406,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             tileColor: const Color(0xFFFF4A4A).withOpacity(0.15),
             leading: const Icon(Icons.delete_forever, color: Color(0xFFFF4A4A)),
             title: const Text('Delete Account', style: TextStyle(color: Color(0xFFFF4A4A))),
-            onTap: () {},
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: const Color(0xFF181826),
+                  title: const Text('Delete Account', style: TextStyle(color: Colors.white)),
+                  content: const Text('Are you sure you want to delete your account? This action cannot be undone.', style: TextStyle(color: Colors.white70)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _deleteAccount(); // Викликаємо функцію видалення
+                      },
+                      child: const Text('Delete', style: TextStyle(color: Color(0xFFFF4A4A))),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),

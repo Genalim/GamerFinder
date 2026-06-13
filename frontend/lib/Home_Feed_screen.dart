@@ -26,7 +26,7 @@ class GamerProfile {
   final List<String> platformsList;
   final Map<String, String> connectedPlatforms;
   final List<int> times; // ДОДАНО: для матчингу
-  final int rating;
+  final double rating;
   final String password;
 
   GamerProfile({
@@ -141,7 +141,7 @@ class GamerProfile {
           .map((item) => (item['utc_hour'] as num).toInt())
           .toList()
           : [],
-      rating: json['rating'] != null ? (json['rating'] as num).toInt() : 0,
+      rating: json['rating'] != null ? (json['rating'] as num).toDouble() : 0.0,
       password: '',
     );
   }

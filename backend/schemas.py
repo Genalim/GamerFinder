@@ -102,7 +102,7 @@ class UserProfileResponse(BaseModel):
     avatar: Optional[str] = None
     is_pro: bool
     is_online: bool
-    rating: int
+    rating: float
     voice_chat: bool
 
     # Вкладені дані з використанням створених вище схем

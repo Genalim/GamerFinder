@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -14,8 +14,9 @@ class User(Base):
     voice_chat = Column(Boolean, default=False)
     is_online = Column(Boolean, default=False)
     is_pro = Column(Boolean, default=False)
-    rating = Column(Integer, default=0)
+    rating = Column(Float, default=0.0)
     is_verified = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
 
     # Зв'язки (дозволяють робити user.availability тощо)
     availability = relationship("UserAvailability", backref="user")

@@ -39,17 +39,14 @@ class FriendItem {
     required this.friendshipId,
   });
 
-  factory FriendItem.fromJson(Map<String, dynamic> json) {
-    print("DEBUG: Парсимо JSON: $json");
-
-    // МІНІМАЛЬНА ЗМІНА: Визначаємо, де знаходяться дані (в корені або в об'єкті 'user')
+  factory FriendItem.fromJson(Map<String, dynamic> json, {bool isRequest = false}) {
+    // Якщо це запит (Requests), то дані користувача лежать у полі 'user'
+    // Якщо це список друзів, дані можуть бути в корені або в 'user'
     final data = json['user'] ?? json;
 
     return FriendItem(
-      // friendshipId беремо з кореня, бо це дані про запис дружби
+      // friendshipId беремо з кореня (це id запису дружби)
       friendshipId: json['id'] ?? 0,
-
-      // Інші дані беремо з data (або корінь, або вкладений user)
       userId: data['id'] ?? 0,
       nickname: data['nickname'] ?? 'Unknown',
       avatarUrl: data['avatar'],
@@ -58,13 +55,10 @@ class FriendItem {
       isPro: data['is_pro'] ?? false,
       isProOnly: false,
       rating: (data['rating'] ?? 0.0).toDouble(),
-
-      // Для вкладених списків теж використовуємо data
       gameName: (data['games'] != null && (data['games'] as List).isNotEmpty)
           ? data['games'][0]['game']['name']
           : 'No games',
-      platform: (data['platforms'] != null &&
-          (data['platforms'] as List).isNotEmpty)
+      platform: (data['platforms'] != null && (data['platforms'] as List).isNotEmpty)
           ? data['platforms'][0]['platform']
           : 'Unknown',
       playStyle: (data['styles'] != null && (data['styles'] as List).isNotEmpty)
@@ -174,37 +168,32 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   Future<void> _loadData() async {
-    // 1. Запит для ЗАПИТІВ (Requests)
-    final reqResponse = await http.get(
-      Uri.parse('${ApiConfig.baseUrl}/friends/requests'),
-      headers: await ApiService.getHeaders(),
-    );
-    print("DEBUG: Статус /friends/requests: ${reqResponse.statusCode}");
-    print("DEBUG: Тіло /friends/requests: ${reqResponse.body}");
+    final reqResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/requests'), headers: await ApiService.getHeaders());
+    final friendsResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/list'), headers: await ApiService.getHeaders());
 
-    // 2. Запит для ДРУЗІВ (Friends List)
-    final friendsResponse = await http.get(
-      Uri.parse('${ApiConfig.baseUrl}/friends/list'),
-      headers: await ApiService.getHeaders(),
-    );
-    print("DEBUG: Статус /friends/list: ${friendsResponse.statusCode}");
-    print("DEBUG: Тіло /friends/list: ${friendsResponse.body}");
-
-    // Перевірка, чи екран ще активний
     if (!mounted) return;
 
     if (reqResponse.statusCode == 200 && friendsResponse.statusCode == 200) {
-      setState(() {
-        // Парсимо запити
-        List<dynamic> reqList = json.decode(reqResponse.body);
-        _requestsList = reqList.map((item) => FriendItem.fromJson(item)).toList();
+      List<dynamic> reqList = json.decode(reqResponse.body);
+      List<dynamic> frList = json.decode(friendsResponse.body);
 
-        // Парсимо друзів
-        List<dynamic> frList = json.decode(friendsResponse.body);
+      // Фільтрація дублікатів через Set
+      Set<int> seenRequestIds = {};
+      List<FriendItem> uniqueRequests = [];
+
+      for (var item in reqList) {
+        final req = FriendItem.fromJson(item, isRequest: true);
+        if (!seenRequestIds.contains(req.friendshipId)) {
+          uniqueRequests.add(req);
+          seenRequestIds.add(req.friendshipId);
+        }
+      }
+
+      setState(() {
+        _requestsList = uniqueRequests;
+        // Аналогічно для _friendsList, якщо потрібно
         _friendsList = frList.map((item) => FriendItem.fromJson(item)).toList();
       });
-    } else {
-      print("Помилка завантаження: перевірте авторизацію або API");
     }
   }
 

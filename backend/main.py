@@ -214,6 +214,13 @@ async def check_nickname(nickname: str, db: AsyncSession = Depends(get_db)):
         return {"exists": True}
     return {"exists": False}
 
+@app.get("/check-email/{email}")
+async def check_email(email: str, db: AsyncSession = Depends(get_db)):
+    # Шукаємо користувача з такою поштою
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+    return {"exists": user is not None}
+
 @app.post("/ensure-game")
 async def ensure_game(data: dict, db: AsyncSession = Depends(get_db)):
     igdb_id = data.get("igdb_id")
@@ -289,7 +296,8 @@ async def find_matches(current_user_id: int, db: AsyncSession = Depends(get_db))
         .filter(
             and_(
                 UserGames.game_id.in_(my_game_ids),
-                User.id != current_user_id
+                User.id != current_user_id,
+                User.is_active == True
             )
         )
         .distinct()
@@ -320,16 +328,17 @@ async def send_friend_request(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # 1. Перевірка на існування (ваш код)
+    # 1. ЖОРСТКА ПЕРЕВІРКА: чи існує вже будь-який зв'язок між цими гравцями?
     stmt = select(Friendship).filter(
         ((Friendship.user_id == current_user_id) & (Friendship.friend_id == request.friend_id)) |
         ((Friendship.user_id == request.friend_id) & (Friendship.friend_id == current_user_id))
     )
     result = await db.execute(stmt)
     if result.scalars().first():
-        raise HTTPException(status_code=400, detail="Request already exist or already friends")
+        # Якщо запис є - ми просто повертаємо помилку або ігноруємо
+        raise HTTPException(status_code=400, detail="Request already exists")
 
-    # 2. Створюємо запит
+    # 2. Якщо запису немає — створюємо
     new_request = Friendship(user_id=current_user_id, friend_id=request.friend_id, status="pending")
     db.add(new_request)
     await db.commit()
@@ -398,7 +407,8 @@ async def get_my_friends(
     ).join(Friendship, (User.id == Friendship.user_id) | (User.id == Friendship.friend_id)).filter(
         ((Friendship.user_id == current_user_id) | (Friendship.friend_id == current_user_id)),
         Friendship.status == "accepted",
-        User.id != current_user_id
+        User.id != current_user_id,
+        User.is_active == True
     ).distinct() # Distinct важливо, щоб не було дублів
 
     result = await db.execute(stmt)
@@ -410,27 +420,31 @@ async def get_friend_requests(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    result = await db.execute(
+    # Використовуємо .unique() перед виконанням запиту — це критично для selectinload
+    stmt = (
         select(Friendship)
         .options(
-            # Підвантажуємо юзера
             selectinload(Friendship.user)
-            # Підвантажуємо вкладені колекції юзера
             .selectinload(User.languages),
             selectinload(Friendship.user).selectinload(User.platforms),
             selectinload(Friendship.user).selectinload(User.accounts),
             selectinload(Friendship.user).selectinload(User.availability),
             selectinload(Friendship.user).selectinload(User.styles),
-            # А ось тут ми доповнюємо: підвантажуємо UserGames І їхню гру
             selectinload(Friendship.user).selectinload(User.games)
-            .selectinload(UserGames.game) # <--- ОСЬ ЦЬОГО НЕ ВИСТАЧАЛО
+            .selectinload(UserGames.game)
         )
         .filter(
             Friendship.friend_id == current_user_id,
-            Friendship.status == 'pending'
+            Friendship.status == 'pending',
+            # Тут ми звертаємось до зв'язаного об'єкта user,
+            # щоб перевірити активність того, хто надіслав запит
+            Friendship.user.has(User.is_active == True)
         )
     )
-    requests = result.scalars().all()
+
+    result = await db.execute(stmt)
+    # .unique() видаляє дублікати об'єктів Friendship, які могли з'явитися через join
+    requests = result.unique().scalars().all()
     return requests
 
 # Видалення друга або скасування запиту
@@ -507,7 +521,8 @@ async def get_blocked_friends(
         Friendship, User.id == Friendship.friend_id
     ).filter(
         Friendship.user_id == current_user_id,
-        Friendship.status == "blocked"
+        Friendship.status == "blocked",
+        User.is_active == True
     ).distinct()
 
     result = await db.execute(stmt)
@@ -596,7 +611,7 @@ async def rate_user(
     avg_rating = avg_result.scalar() or 0
 
     # Оновлюємо поле rating в таблиці users (округлюємо до цілого числа)
-    target_user.rating = int(round(avg_rating))
+    target_user.rating = round(float(avg_rating), 1)
     await db.commit()
 
     return {
@@ -696,6 +711,27 @@ async def update_user_profile(
     await db.refresh(user)
 
     return user
+
+@app.delete("/users/me")
+async def delete_my_account(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    user = await db.get(User, current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Просто позначаємо як неактивного
+    user.is_active = False
+    user.nickname = f"Deleted_{current_user_id}"
+    user.email = f"deleted_{current_user_id}@stub.com"
+
+    # Решту зв'язків (ігри, стилі) можна видалити або залишити
+    # (якщо вони нам не заважають, то можна навіть не видаляти,
+    # просто користувач перестане з'являтися в пошуку)
+
+    await db.commit()
+    return {"message": "Account successfully deleted"}
 
 
 if __name__ == "__main__":

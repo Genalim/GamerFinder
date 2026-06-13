@@ -189,6 +189,43 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  Timer? _emailDebounce; // Додайте цю змінну в клас, як і _nickDebounce
+
+  Future<void> _checkEmailAvailability(String email) async {
+    // Не перевіряємо, якщо пошта не змінилася
+    if (email == UserSession().currentUser?.email) {
+      setState(() {
+        _emailMsg = "Email looks good";
+        _emailColor = const Color(0xFF00F5A0);
+        _emailValid = true;
+      });
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/check-email/$email'),
+      );
+
+      if (response.statusCode == 200) {
+        final exists = json.decode(response.body)['exists'];
+        setState(() {
+          if (exists) {
+            _emailMsg = "Email is already registered";
+            _emailColor = const Color(0xFFFF3B5C);
+            _emailValid = false;
+          } else {
+            _emailMsg = "Email is available";
+            _emailColor = const Color(0xFF00F5A0);
+            _emailValid = true;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка перевірки пошти: $e");
+    }
+  }
+
   Future<String?> _uploadAvatarToServer(String filePath) async {
     try {
       var request = http.MultipartRequest('POST', Uri.parse('${ApiConfig.baseUrl}/upload-avatar'));
@@ -212,6 +249,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _passwordController.dispose();
     _platformControllers.forEach((key, controller) => controller.dispose());
     _nickDebounce?.cancel();
+    _emailDebounce?.cancel();
     super.dispose();
   }
 
@@ -318,8 +356,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _validateEmail(String v) {
+    final reg = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+
+    if (_emailDebounce?.isActive ?? false) _emailDebounce!.cancel();
+
     setState(() {
-      final reg = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
       if (v.isEmpty) {
         _emailMsg = "Email cannot be empty";
         _emailColor = const Color(0xFFFF3B5C);
@@ -329,9 +370,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _emailColor = const Color(0xFFFF3B5C);
         _emailValid = false;
       } else {
-        _emailMsg = "Email looks good";
-        _emailColor = const Color(0xFF00F5A0);
-        _emailValid = true;
+        _emailMsg = "Checking availability...";
+        _emailColor = Colors.white70;
+        _emailValid = false; // Поки перевіряємо - форма не готова
+
+        _emailDebounce = Timer(const Duration(milliseconds: 500), () {
+          _checkEmailAvailability(v);
+        });
       }
     });
   }

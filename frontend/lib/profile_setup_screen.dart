@@ -96,6 +96,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
   }
 
+
 // Твій допоміжний метод для завантаження
   Future<String?> _uploadAvatarToServer(String filePath) async {
     try {
@@ -120,6 +121,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   List<String> _proAvatars = [];
   bool _isLoadingAssets = true;
   Timer? _nickDebounce;
+  Timer? _emailDebounce;
 
   // Контролери робимо late, щоб заповнити їх в initState з менеджера
   late TextEditingController _nicknameController;
@@ -164,6 +166,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     _passwordController.dispose();
     _platformControllers.forEach((key, controller) => controller.dispose());
     _nickDebounce?.cancel(); // Це зупинить таймер при закритті екрана
+    _emailDebounce?.cancel();
     super.dispose();
   }
 
@@ -321,21 +324,53 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     });
   }
 
+  Future<void> _checkEmailAvailability(String email) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/check-email/$email'),
+      );
+
+      if (response.statusCode == 200) {
+        final exists = json.decode(response.body)['exists'];
+        if (mounted) {
+          setState(() {
+            if (exists) {
+              _emailMsg = "Email already registered";
+              _emailColor = const Color(0xFFFF3B5C);
+              _emailValid = false;
+            } else {
+              _emailMsg = "Email is available";
+              _emailColor = const Color(0xFF00F5A0);
+              _emailValid = true;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      print("Помилка перевірки пошти: $e");
+    }
+  }
+
   void _validateEmail(String v) {
+    final reg = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+
+    if (_emailDebounce?.isActive ?? false) _emailDebounce!.cancel();
+
     setState(() {
-      final reg = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+      _emailValid = false; // Поки перевіряємо — форма не готова
       if (v.isEmpty) {
         _emailMsg = "Enter a valid email (e.g. user@example.com)";
         _emailColor = const Color(0xFF6F6F80);
-        _emailValid = false;
       } else if (!reg.hasMatch(v)) {
         _emailMsg = "Invalid email format";
         _emailColor = const Color(0xFFFF3B5C);
-        _emailValid = false;
       } else {
-        _emailMsg = "Email looks good";
-        _emailColor = const Color(0xFF00F5A0);
-        _emailValid = true;
+        _emailMsg = "Checking availability...";
+        _emailColor = Colors.white70;
+
+        _emailDebounce = Timer(const Duration(milliseconds: 500), () {
+          _checkEmailAvailability(v);
+        });
       }
     });
   }
