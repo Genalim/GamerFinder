@@ -169,6 +169,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         : 'Not specified';
 
     final String playTimeText = widget.profile.readablePlayTime;
+    final String ratingText = widget.profile.rating.toStringAsFixed(1);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,50 +234,61 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               // Нікнейм + PRO badge + Зірочка
               Row(
                 children: [
+                  // Нікнейм: займає весь доступний простір, але стискається при потребі
                   Expanded(
-                    child: AutoSizeText(
-                      widget.profile.nickname,
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500, fontFamily: 'Poppins'),
-                      maxLines: 1,
-                      minFontSize: 13,
-                      stepGranularity: 1,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min, // Стискається під розмір вмісту
+                      children: [
+                        Flexible(
+                          child: Text(
+                            widget.profile.nickname,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                fontFamily: 'Poppins'
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (widget.profile.isPro) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [Color(0xFF00F5A0), Color(0xFF0066FF)]),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 8)),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (widget.profile.isPro) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 34,
-                      height: 13,
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF00F5A0), Color(0xFF0066FF)],
-                          begin: Alignment.centerRight,
-                          end: Alignment.centerLeft,
-                        ),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'PRO',
+
+                  // 2. Зірочка та рейтинг (завжди праворуч, фіксований розмір)
+                  const SizedBox(width: 10), // Відступ перед зіркою
+                  Row(
+                    children: [
+                      const FigmaRatingStar(isFilled: true, size: 15),
+                      const SizedBox(width: 4),
+                      Text(
+                        (UserSession().currentUser?.isPro ?? false)
+                            ? widget.profile.rating.toStringAsFixed(1)
+                            : 'PRO only',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: (UserSession().currentUser?.isPro ?? false)
+                              ? accentColor
+                              : const Color(0xFF8E8EA9),
                           fontFamily: 'Inter',
                           fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          height: 0.6,
-                          leadingDistribution: TextLeadingDistribution.even,
+                          // Динамічний розмір: 15 для рейтингу, 10 для "PRO only"
+                          fontSize: (UserSession().currentUser?.isPro ?? false) ? 15 : 10,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    const FigmaRatingStar(isFilled: true, size: 11),
-                    const SizedBox(width: 4),
-                    const Text(
-                      'PRO only',
-                      style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 7),
-                    ),
-                  ],
+                    ],
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -830,8 +842,8 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           children: List.generate(5, (index) {
             return GestureDetector(
               onTap: //_hasRatedGamer
-                  //? null
-                () async {
+              //? null
+                  () async {
                 final success = await ApiService.rateUser(
                     widget.profile.id,
                     index + 1

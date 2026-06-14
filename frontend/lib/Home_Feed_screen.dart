@@ -7,6 +7,8 @@ import 'custom_widgets.dart';
 import 'gamer_profile_screen.dart';
 import 'user_session.dart';
 import 'api_config.dart';
+import 'edit_game_selection_screen.dart';
+import 'package:flutter/gestures.dart';
 
 class GamerProfile {
   final int id;
@@ -227,6 +229,7 @@ class MatchProfile {
   final List<String> platforms;
   final List<int> availability;
   final Map<String, String> connectedPlatforms;
+  final double rating;
 
   MatchProfile({
     required this.id,
@@ -240,6 +243,7 @@ class MatchProfile {
     required this.platforms,
     required this.availability,
     required this.connectedPlatforms,
+    required this.rating,
   });
 
   factory MatchProfile.fromJson(Map<String, dynamic> json) {
@@ -258,6 +262,7 @@ class MatchProfile {
           ? Map.fromEntries((json['accounts'] as List)
           .map((item) => MapEntry(item['service'].toString(), item['username'].toString())))
           : {},
+      rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -334,6 +339,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   bool _hasUnreadNotifications = true;
   List<GamerProfile> _loadedGamers = [];
   bool _isLoadingGamers = true;
+  double _minRatingFilter = 0.0;
 
   // 1. Додаємо список для ігор поточного користувача
   List<Map<String, String>> _myAvailableGames = <Map<String, String>>[];
@@ -389,7 +395,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
             platformsList: m.platforms,
             times: m.availability,
-            rating: 0,
+            rating: m.rating,
             password: '',
           )).toList();
         });
@@ -417,6 +423,32 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
     super.dispose();
   }
 
+  void _resetFilters() {
+    setState(() {
+      _searchController.clear();
+      _confirmedActiveGames.clear();
+      _temporarilySelectedGames.clear();
+      _selectedPlayStyles.clear();
+      _selectedPlatforms.clear();
+      _voiceChatOn = false;
+      _minRatingFilter = 0.0; // Скидаємо фільтр рейтингу
+    });
+  }
+
+  Widget _buildLetterAvatar(String nickname) {
+    return Center(
+      child: Text(
+        nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
+        style: const TextStyle(
+          fontFamily: 'Love Light',
+          fontSize: 18, // Можна налаштувати розмір під 33х33 контейнер
+          fontWeight: FontWeight.w400,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -442,6 +474,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
       if (_voiceChatOn && !gamer.hasVoice) {
         return false;
       }
+      if (_minRatingFilter > 0) {
+        if (gamer.rating < _minRatingFilter) return false;
+      }
+
       return true;
     }).toList();
 
@@ -479,22 +515,13 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                         const SizedBox(width: 20),
                         GestureDetector(
                           onTap: () {
-                            // Викликаємо оновлення профілю та метчів
+                            _resetFilters();
                             _loadUserProfile();
                           },
-                          child: Container(
+                          // Прибираємо Container з BoxDecoration зовсім
+                          child: Padding(
                             padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF181826), // Колір карток
-                              shape: BoxShape.circle,
-                              border: Border.all(color: accentColor, width: 1.5),
-
-                            ),
-                            child: Icon(
-                              Icons.refresh,
-                              color: accentColor,
-                              size: 20,
-                            ),
+                            child: RefreshIcon(color: accentColor, size: 24),
                           ),
                         ),
                       ],
@@ -548,6 +575,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   }
 
   Widget _buildSearchHeader(Color accentColor) {
+    final currentUser = UserSession().currentUser;
     String placeholderText = _confirmedActiveGames.isNotEmpty
         ? _confirmedActiveGames.join(' / ')
         : 'What do you want to play now?';
@@ -573,7 +601,21 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 ),
               ],
             ),
-            child: const Icon(Icons.person_outline, color: Colors.white, size: 18),
+            // 2. Логіка відображення аватарки
+            child: ClipOval(
+              child: (currentUser != null && currentUser.avatar != null && currentUser.avatar!.isNotEmpty)
+                  ? Image.asset(
+                currentUser.avatar!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(currentUser.nickname),
+              )
+                  : Center(
+                child: Text(
+                  currentUser?.nickname.isNotEmpty == true ? currentUser!.nickname[0].toUpperCase() : '?',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ),
+            ),
           ),
           const SizedBox(width: 4),
           Expanded(
@@ -796,23 +838,45 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               children: [
                 Expanded(
                   child: GestureDetector(
-                    onTap: () {
+                    onTap: () async {
+                      // 1. Закриваємо дропдаун
                       setState(() {
                         _isGameDropdownOpen = false;
                       });
+
+                      // 2. Переходимо на екран налаштувань
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const EditGameSelectionScreen()),
+                      );
+
+                      // 3. Після повернення — оновлюємо профіль, щоб підтягнути нові ігри
+                      _loadUserProfile();
                     },
                     child: RichText(
-                      text: const TextSpan(
-                        style: TextStyle(color: Colors.white60, fontSize: 11, fontFamily: 'Inter', height: 1.3),
+                      text: TextSpan(
+                        style: const TextStyle(color: Colors.white60, fontSize: 11, fontFamily: 'Inter', height: 1.3),
                         children: [
-                          TextSpan(text: 'Don’t see your game here? Manage your games in '),
+                          const TextSpan(text: 'Don’t see your game here? Manage your games in '),
                           TextSpan(
                             text: 'Settings',
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: Color(0xFF00F5A0),
                               fontWeight: FontWeight.w600,
                               decoration: TextDecoration.underline,
                             ),
+                            // Ось тут ми "вішаємо" обробник тільки на слово Settings
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () async {
+                                setState(() {
+                                  _isGameDropdownOpen = false;
+                                });
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => const EditGameSelectionScreen()),
+                                );
+                                _loadUserProfile();
+                              },
                           ),
                         ],
                       ),
@@ -1004,19 +1068,41 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               ),
             ],
           ),
+          //Rating Filter
           Row(
-            children: const [
-              Text(
+            children: [
+              const Text(
                 'Rating',
                 style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
               ),
-              SizedBox(width: 6),
-              Icon(Icons.lock, color: Color(0xFF6F6F80), size: 16),
-              SizedBox(width: 4),
-              Text(
-                'Unlock in PRO',
-                style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
-              ),
+              const SizedBox(width: 10),
+              // Якщо користувач PRO — показуємо ваші FigmaRatingStar, інакше — замок
+              if (UserSession().currentUser?.isPro ?? false) ...[
+                ...List.generate(5, (index) {
+                  final starValue = (index + 1).toDouble();
+                  return GestureDetector(
+                    onTap: () => setState(() {
+                      // Перемикач: вибір зірки або скидання фільтра
+                      _minRatingFilter = (_minRatingFilter == starValue) ? 0.0 : starValue;
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: FigmaRatingStar(
+                        size: 16,
+                        // Зірка заповнена, якщо її значення <= обраному фільтру
+                        isFilled: _minRatingFilter >= starValue,
+                      ),
+                    ),
+                  );
+                }),
+              ] else ...[
+                const Icon(Icons.lock, color: Color(0xFF6F6F80), size: 16),
+                const SizedBox(width: 4),
+                const Text(
+                  'Unlock in PRO',
+                  style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
+                ),
+              ],
             ],
           ),
         ],
@@ -1210,21 +1296,26 @@ class GamerCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const Positioned(
-                top: 7,
+                Positioned(
+                top: 2,
                 right: 0,
                 child: Row(
                   children: [
-                    FigmaRatingStar(isFilled: true, size: 11),
+                    FigmaRatingStar(isFilled: true, size: 14),
                     SizedBox(width: 4),
                     Text(
-                        'PRO only',
-                        style: TextStyle(
-                            color: Color(0xFF8E8EA9),
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                            fontSize: 7
-                        )
+                      (UserSession().currentUser?.isPro ?? false)
+                          ? profile.rating.toStringAsFixed(1)
+                          : 'PRO only',
+                      style: TextStyle(
+                        color: (UserSession().currentUser?.isPro ?? false)
+                            ? const Color(0xFF00F5A0) // колір рейтингу
+                            : const Color(0xFF8E8EA9), // колір PRO only
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w700,
+                        // Логіка розміру:
+                        fontSize: (UserSession().currentUser?.isPro ?? false) ? 15 : 10,
+                      ),
                     ),
                   ],
                 ),
