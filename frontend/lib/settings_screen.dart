@@ -12,6 +12,7 @@ import 'edit_rating_screen.dart';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
 import 'dart:convert';
+import 'notification_history_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -341,7 +342,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.history, color: accentColor),
               title: const Text('History (Matches & Notifications)', style: TextStyle(color: Colors.white)),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const HistoryScreen()),
+                );
+              },
             ),
           ),
           const SizedBox(height: 20),

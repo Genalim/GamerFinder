@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'Home_Feed_screen.dart';
 import 'gamer_profile_screen.dart';
+import 'user_session.dart';
 
 // =============================================================================
 // МОДЕЛЬ ДАНИХ ДЛЯ ЕКРАНУ
@@ -23,6 +24,7 @@ class FriendItem {
   final String platform;
   final String playStyle;
   final int friendshipId;
+  final List<String> allGames;
 
   const FriendItem({
     required this.userId,
@@ -37,12 +39,18 @@ class FriendItem {
     required this.platform,
     required this.playStyle,
     required this.friendshipId,
+    required this.allGames,
   });
 
   factory FriendItem.fromJson(Map<String, dynamic> json, {bool isRequest = false}) {
     // Якщо це запит (Requests), то дані користувача лежать у полі 'user'
     // Якщо це список друзів, дані можуть бути в корені або в 'user'
     final data = json['user'] ?? json;
+
+    // Парсимо ВСІ ігри, а не тільки першу
+    List<String> games = (data['games'] != null)
+    ? (data['games'] as List).map((g) => g['game']['name'].toString()).toList()
+        : [];
 
     return FriendItem(
       // friendshipId беремо з кореня (це id запису дружби)
@@ -64,6 +72,7 @@ class FriendItem {
       playStyle: (data['styles'] != null && (data['styles'] as List).isNotEmpty)
           ? data['styles'][0]['style']
           : 'Default',
+      allGames: games,
     );
   }
 }
@@ -78,6 +87,7 @@ class FriendsScreen extends StatefulWidget {
 class _FriendsScreenState extends State<FriendsScreen> {
   int _selectedTab = 0; // 0 - Friends, 1 - Requests, 2 - Blocked
   bool _hasUnreadRequests = true; // Стан для керування кружечком нотифікації
+  DateTime? _lastInviteTime;
 
   void refreshData() {
     _loadData(); //метод для таби запитів (Requests in friends)
@@ -102,7 +112,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
         await Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => GamerProfileScreen(profile: profile)),
-        );
+        ).then((_) {
+          setState(() {}); // Синхронізує кнопку при поверненні
+        });
 
         // 2. Тільки ТЕПЕР оновлюємо дані (після повернення назад)
         if (mounted) {
@@ -113,30 +125,39 @@ class _FriendsScreenState extends State<FriendsScreen> {
       print("Помилка відкриття профілю: $e");
     }
   }
-
+  bool _isProcessing = false;
   Future<void> _loadFriends() async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.baseUrl}/friends/list'),
-      headers: await ApiService.getHeaders(),
-    );
-
-    if (!mounted) return; // Захист від помилки async gaps
-
-    if (response.statusCode == 200) {
-      List<dynamic> list = json.decode(response.body);
-      setState(() {
-        _friendsList = list.map((item) => FriendItem.fromJson(item)).toList();
-      });
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+        headers: await ApiService.getHeaders(),
+      );
+      if (response.statusCode == 200 && mounted) {
+        List<dynamic> list = json.decode(response.body);
+        setState(() {
+          _friendsList = list.map((item) => FriendItem.fromJson(item)).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка друзів: $e");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
   Future<void> _loadBlocked() async {
-    // Змініть ендпоінт на той, який відповідає вашому бекенду для списку заблокованих
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
     try {
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/friends/blocked'),
         headers: await ApiService.getHeaders(),
       );
+
+      print("DEBUG: Raw blocked response: ${response.body}");
+
       if (response.statusCode == 200 && mounted) {
         List<dynamic> list = json.decode(response.body);
         setState(() {
@@ -144,8 +165,30 @@ class _FriendsScreenState extends State<FriendsScreen> {
         });
       }
     } catch (e) {
-      print("Помилка завантаження заблокованих: $e");
+      debugPrint("Помилка заблокованих: $e");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  Widget _buildProBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF00F5A0), Color(0xFF0066FF)]),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'PRO',
+        style: TextStyle(
+          color: Colors.white,
+          fontFamily: 'Inter',
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          height: 1.0,
+        ),
+      ),
+    );
   }
 
   final Map<String, dynamic> myPreferences = {
@@ -166,35 +209,88 @@ class _FriendsScreenState extends State<FriendsScreen> {
     _loadFriends();   // Друзі
     _loadBlocked();   // Заблоковані
   }
-
   Future<void> _loadData() async {
-    final reqResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/requests'), headers: await ApiService.getHeaders());
-    final friendsResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/list'), headers: await ApiService.getHeaders());
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      final reqResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/requests'), headers: await ApiService.getHeaders());
+      final friendsResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/friends/list'), headers: await ApiService.getHeaders());
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (reqResponse.statusCode == 200 && friendsResponse.statusCode == 200) {
-      List<dynamic> reqList = json.decode(reqResponse.body);
-      List<dynamic> frList = json.decode(friendsResponse.body);
+      if (reqResponse.statusCode == 200 && friendsResponse.statusCode == 200) {
+        List<dynamic> reqList = json.decode(reqResponse.body);
+        List<dynamic> frList = json.decode(friendsResponse.body);
 
-      // Фільтрація дублікатів через Set
-      Set<int> seenRequestIds = {};
-      List<FriendItem> uniqueRequests = [];
-
-      for (var item in reqList) {
-        final req = FriendItem.fromJson(item, isRequest: true);
-        if (!seenRequestIds.contains(req.friendshipId)) {
-          uniqueRequests.add(req);
-          seenRequestIds.add(req.friendshipId);
+        Set<int> seenRequestIds = {};
+        List<FriendItem> uniqueRequests = [];
+        for (var item in reqList) {
+          final req = FriendItem.fromJson(item, isRequest: true);
+          if (!seenRequestIds.contains(req.friendshipId)) {
+            uniqueRequests.add(req);
+            seenRequestIds.add(req.friendshipId);
+          }
         }
+        setState(() {
+          _requestsList = uniqueRequests;
+          _friendsList = frList.map((item) => FriendItem.fromJson(item)).toList();
+        });
       }
-
-      setState(() {
-        _requestsList = uniqueRequests;
-        // Аналогічно для _friendsList, якщо потрібно
-        _friendsList = frList.map((item) => FriendItem.fromJson(item)).toList();
-      });
+    } catch (e) {
+      debugPrint("Помилка завантаження даних: $e");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  Future<void> _showInviteDialog(BuildContext context, FriendItem friend, VoidCallback onInviteSent) async {
+    String? selectedGame;
+    final myGames = UserSession().currentUser?.gamesList ?? [];
+    final commonGames = friend.allGames.where((g) => myGames.contains(g)).toList();
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Dialog(
+          backgroundColor: const Color(0xFF181826),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Invite to play in:', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                ...commonGames.map((game) => RadioListTile<String>(
+                  title: Text(game, style: const TextStyle(color: Colors.white)),
+                  value: game,
+                  groupValue: selectedGame,
+                  onChanged: (val) => setModalState(() => selectedGame = val),
+                  activeColor: const Color(0xFF00F5A0),
+                )),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                    ElevatedButton(
+                      onPressed: selectedGame == null ? null : () async {
+                        bool success = await ApiService.sendInvite(friend.userId, selectedGame!);
+                        if (success && mounted) {
+                          onInviteSent(); // Оновлює стан у FriendsScreen
+                          Navigator.pop(context);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
+                      child: const Text('Send', style: TextStyle(color: Colors.black)),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -319,7 +415,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
         // Кнопка Blocked
         Expanded(
           child: GestureDetector(
-            onTap: () => setState(() => _selectedTab = 2),
+            onTap: () {
+              setState(() => _selectedTab = 2);
+              _loadBlocked(); // ПРИМУСОВИЙ ВИКЛИК ПРИ НАТИСКАННІ
+            },
             child: Container(
               height: 36,
               decoration: BoxDecoration(
@@ -451,9 +550,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
   // КАРТКА ДРУГА (FRIENDS TAB) - Висота 106px
   // =============================================================================
   Widget _buildFriendCard(FriendItem friend) {
+    final bool amIPro = UserSession().currentUser?.isPro ?? false;
+    final bool canInvite = UserSession.canInvite(friend.userId);
     return Container(
       width: 327,
-      height: 106,
+      height: 110,
       decoration: BoxDecoration(
         color: const Color(0xFF181826),
         borderRadius: BorderRadius.circular(12),
@@ -495,60 +596,37 @@ class _FriendsScreenState extends State<FriendsScreen> {
             ),
           ),
           Positioned(
-            left: 59,
-            top: 13,
-            right: 12,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _openProfile(friend.userId),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    friend.nickname,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                    ),
-                  ),
-                  if (friend.isPro) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF00F5A0), Color(0xFF0066FF)]),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'PRO',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'Inter',
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          height: 1.0,
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (friend.isProOnly) ...[
-                    const SizedBox(width: 8),
-                    const Icon(Icons.star, color: Color(0xFFFFD700), size: 10),
-                    const SizedBox(width: 2),
-                    const Text(
-                      'PRO only',
-                      style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 7, fontWeight: FontWeight.w700),
-                    ),
-                  ],
+            left: 60, top: 5, right: 12,
+            child: Row(
+              children: [
+                Text(friend.nickname, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 6),
+
+                if (friend.isPro) ...[
+                  _buildProBadge(),
+                  const SizedBox(width: 6),
                 ],
-              ),
+
+                // Універсальна зірочка перед обома варіантами
+                const FigmaRatingStar(isFilled: true, size: 12),
+                const SizedBox(width: 3),
+
+                // Логіка вибору тексту після зірочки
+                amIPro
+                    ? Text(
+                    friend.rating.toStringAsFixed(1),
+                    style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.w700)
+                )
+                    : const Text(
+                    'PRO only',
+                    style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 9, fontWeight: FontWeight.w700)
+                ),
+              ],
             ),
           ),
           Positioned(
             left: 60,
-            top: 28,
+            top: 26,
             child: Row(
               children: [
                 Container(
@@ -602,7 +680,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
               children: [
                 Expanded(
                   child: Container(
-                    height: 27,
+                    height: 32,
                     decoration: BoxDecoration(
                       border: Border.all(color: const Color(0xFF00F5A0), width: 1),
                       borderRadius: BorderRadius.circular(10),
@@ -610,7 +688,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text('Start chat', style: TextStyle(color: Color(0xFF00F5A0), fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.w500)),
+                        Text('Start chat', style: TextStyle(color: Color(0xFF00F5A0), fontFamily: 'Inter', fontSize: 15, fontWeight: FontWeight.w500)),
                         SizedBox(width: 10),
                         FigmaArrowIcon(),
                       ],
@@ -619,11 +697,36 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 ),
                 const SizedBox(width: 23),
                 Expanded(
-                  child: Container(
-                    height: 27,
-                    decoration: BoxDecoration(color: const Color(0xFF00F5A0), borderRadius: BorderRadius.circular(10)),
-                    child: const Center(
-                      child: Text('Invite to play', style: TextStyle(color: Color(0xFF0F0F1A), fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.w700)),
+                  child: GestureDetector(
+                    onTap: (canInvite && !_isProcessing) // БЛОКУЄМО КНОПКУ, ЯКЩО ЙДЕ ЗАПИТ
+                        ? () async {
+                      setState(() => _isProcessing = true); // БЛОКУЄМО ІНШІ ЗАПИТИ
+                      await _showInviteDialog(context, friend, () {
+                        setState(() {
+                          UserSession.registerInvite(friend.userId);
+                        });
+                      });
+                      setState(() => _isProcessing = false); // РОЗБЛОКУЄМО
+                    }
+                        : null,
+                    child: Container(
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: canInvite ? const Color(0xFF00F5A0) : Colors.grey.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Invite to play',
+                          style: TextStyle( // ПРИБРАЛИ const
+                            // Динамічний колір: чорний якщо можна запросити, білий якщо ні
+                            color: canInvite ? const Color(0xFF0F0F1A) : Colors.white,
+                            fontFamily: 'Inter',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -641,7 +744,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _buildRequestCard(FriendItem friend, int index) {
     return Container(
       width: 327,
-      height: 99,
+      height: 110,
       decoration: BoxDecoration(
         color: const Color(0xFF181826),
         border: Border.all(color: const Color(0xFF2B2B3B), width: 1),
@@ -655,8 +758,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
             child: GestureDetector(
               onTap: () => _openProfile(friend.userId),
               child: Container(
-                width: 30,
-                height: 30,
+                width: 40,
+                height: 40,
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   color: Color(0xFF181826),
@@ -684,7 +787,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
           Positioned(
             left: 59,
-            top: 13,
+            top: 5,
             right: 12,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -740,7 +843,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
           Positioned(
             left: 12,
-            top: 59,
+            top: 65,
             right: 12,
             child: Row(
               children: [
@@ -764,7 +867,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       }
                     },
                     child: Container(
-                      height: 27,
+                      height: 32,
                       decoration: BoxDecoration(
                         border: Border.all(color: const Color(0xFF00F5A0), width: 1),
                         borderRadius: BorderRadius.circular(10),
@@ -800,7 +903,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       }
                     },
                     child: Container(
-                      height: 27,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00F5A0),
                         borderRadius: BorderRadius.circular(10),
@@ -833,7 +936,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _buildBlockedCard(FriendItem friend, int index) {
     return Container(
       width: 327,
-      height: 99,
+      height: 105,
       decoration: BoxDecoration(
         color: const Color(0xFF181826),
         border: Border.all(color: const Color(0xFF2B2B3B), width: 1),
@@ -876,7 +979,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
           Positioned(
             left: 59,
-            top: 13,
+            top: 5,
             right: 12,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -974,7 +1077,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       }
                     },
                     child: Container(
-                      height: 27,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: const Color(0xFF00F5A0),
                         borderRadius: BorderRadius.circular(10),
@@ -985,7 +1088,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                           style: TextStyle(
                             color: Color(0xFF0F0F1A),
                             fontFamily: 'Inter',
-                            fontSize: 14,
+                            fontSize: 15,
                             fontWeight: FontWeight.w700,
                           ),
                         ),

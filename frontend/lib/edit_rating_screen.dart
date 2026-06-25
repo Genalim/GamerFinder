@@ -5,14 +5,18 @@ import 'package:http/http.dart' as http;
 import 'custom_widgets.dart';
 import 'api_config.dart';
 import 'user_session.dart';
+import 'gamer_profile_screen.dart';
+import 'Home_Feed_screen.dart';
 
 // Модель для збереження списку оцінок, отриманих від інших юзерів
 class EvaluationModel {
+  final int evaluatorId;
   final String evaluatorNickname;
   final int stars;
   final String? evaluatorAvatar;
 
   EvaluationModel({
+    required this.evaluatorId,
     required this.evaluatorNickname,
     required this.stars,
     this.evaluatorAvatar,
@@ -20,12 +24,15 @@ class EvaluationModel {
 
   factory EvaluationModel.fromJson(Map<String, dynamic> json) {
     return EvaluationModel(
-      evaluatorNickname: json['evaluator_nickname'] ?? 'Gamer',
-      stars: json['stars'] ?? 0,
-      evaluatorAvatar: json['evaluator_avatar'],
+      // Використовуємо 0 як дефолт, якщо ID не прийшов
+      evaluatorId: (json['evaluator_id'] as num?)?.toInt() ?? 0,
+      evaluatorNickname: json['evaluator_nickname']?.toString() ?? 'Gamer',
+      stars: (json['stars'] as num?)?.toInt() ?? 0,
+      evaluatorAvatar: json['evaluator_avatar']?.toString(),
     );
   }
 }
+
 
 class EditRatingScreen extends StatefulWidget {
   const EditRatingScreen({super.key});
@@ -93,6 +100,30 @@ class _EditRatingScreenState extends State<EditRatingScreen> {
           child: FigmaRatingStar(isFilled: index < count),
         );
       }),
+    );
+  }
+
+  Widget _buildAvatar(EvaluationModel eval) {
+    final String? avatarPath = eval.evaluatorAvatar;
+
+    return CircleAvatar(
+      backgroundColor: const Color(0xFF0F0F1A),
+      // Використовуємо ImageProvider через тернарний оператор
+      backgroundImage: (avatarPath != null && avatarPath.isNotEmpty)
+          ? (avatarPath.startsWith('http')
+          ? NetworkImage(avatarPath)        // Якщо це URL (наприклад, з API)
+          : AssetImage(avatarPath))         // Якщо це локальний assets
+          : null,
+      child: (avatarPath == null || avatarPath.isEmpty)
+          ? Text(
+        eval.evaluatorNickname.isNotEmpty ? eval.evaluatorNickname[0].toUpperCase() : 'U',
+        style: const TextStyle(
+          fontFamily: 'Love Light',
+          fontSize: 20,
+          color: Color(0xFF00F5A0),
+        ),
+      )
+          : null,
     );
   }
 
@@ -182,45 +213,107 @@ class _EditRatingScreenState extends State<EditRatingScreen> {
           ),
           const SizedBox(height: 8),
 
-          // Застосовуємо фільтр блюру, якщо юзер не PRO
-          ImageFiltered(
-            imageFilter: _isPro
-                ? ImageFilter.blur(sigmaX: 0, sigmaY: 0)
-                : ImageFilter.blur(sigmaX: 6.0, sigmaY: 6.0),
-            child: _evaluations.isEmpty
-                ? const Card(
-              color: cardColor,
-              child: Padding(
-                padding: EdgeInsets.all(20.0),
-                child: Text(
+// Використовуємо IgnorePointer, щоб не можна було клікати крізь блюр, якщо користувач не PRO
+          IgnorePointer(
+            ignoring: !_isPro,
+            child: ImageFiltered(
+              imageFilter: _isPro
+                  ? ImageFilter.blur(sigmaX: 0, sigmaY: 0)
+                  : ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+              child: _evaluations.isEmpty
+                  ? const Card(
+                color: cardColor,
+                child: Padding(
+                  padding: EdgeInsets.all(20.0),
+                  child: Text(
                     'No evaluations yet',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white54)
-                ),
-              ),
-            )
-                : ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _evaluations.length,
-              itemBuilder: (context, index) {
-                final eval = _evaluations[index];
-                return Card(
-                  color: cardColor,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF0F0F1A),
-                      child: Text(
-                        eval.evaluatorNickname.isNotEmpty ? eval.evaluatorNickname[0].toUpperCase() : 'U',
-                        style: const TextStyle(color: accentColor),
-                      ),
-                    ),
-                    title: Text(eval.evaluatorNickname, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                    trailing: _buildStarsDisplay(eval.stars),
+                    style: TextStyle(color: Colors.white54),
                   ),
-                );
-              },
+                ),
+              )
+                  : ListView.separated( // Використовуємо separated для кращого вигляду
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _evaluations.length,
+                separatorBuilder: (ctx, idx) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final eval = _evaluations[index];
+
+                  // Функція навігації
+                  void _openProfile() async {
+                    // Ваш індикатор (залишаємо як було)
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0))),
+                    );
+
+                    try {
+                      final token = await UserSession.getToken();
+                      final response = await http.get(
+                        Uri.parse("${ApiConfig.baseUrl}/users/${eval.evaluatorId}"),
+                        headers: {
+                          "Content-Type": "application/json",
+                          if (token != null) "Authorization": "Bearer $token",
+                        },
+                      );
+
+                      if (response.statusCode == 200) {
+                        // ДЕБАГ: дивимося, що реально прийшло
+                        final Map<String, dynamic> data = json.decode(response.body);
+                        print("СИРИЙ JSON ДЛЯ ПРОФІЛЮ: $data");
+
+                        // ВИПРАВЛЕННЯ: Тепер ми викликаємо той самий ваш метод,
+                        // але ми гарантуємо, що GamerProfile отримає ID.
+                        final profileData = GamerProfile.fromJson(data);
+
+                        if (mounted) {
+                          Navigator.pop(context); // Ховаємо індикатор
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => GamerProfileScreen(profile: profileData),
+                            ),
+                          );
+                        }
+                      } else {
+                        throw Exception("Failed to load profile: ${response.statusCode}");
+                      }
+                    } catch (e) {
+                      print("ВИКЛЮЧЕННЯ (помилка переходу): $e");
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Could not load profile: $e')),
+                        );
+                      }
+                    }
+                  }
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2B2B3B)),
+                    ),
+                    child: ListTile(
+                      onTap: _openProfile, // Натискання на всю картку
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                      leading: _buildAvatar(eval), // Використовуємо наш новий метод
+                      title: Text(
+                        eval.evaluatorNickname,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500
+                        ),
+                      ),
+                      trailing: _buildStarsDisplay(eval.stars),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ],

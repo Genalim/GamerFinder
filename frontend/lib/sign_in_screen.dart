@@ -195,7 +195,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 child: ElevatedButton(
                   onPressed: _isFormValid && !_isLoading ? _handleSignIn : null,
                   style: ElevatedButton.styleFrom(backgroundColor: _isFormValid ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B)),
-                  child: _isLoading ? const CircularProgressIndicator(color: Colors.black) : Text('Sign In', style: TextStyle(color: _isFormValid ? Colors.black : Colors.white60)),
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.black) : Text('Sign In', style: TextStyle(color: _isFormValid ? Colors.black : Colors.white60, fontSize: 18,)),
                 ),
               ),
               const Spacer(flex: 2),

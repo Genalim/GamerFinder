@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,9 @@ import 'user_session.dart';
 import 'api_config.dart';
 import 'edit_game_selection_screen.dart';
 import 'package:flutter/gestures.dart';
+import 'api_service.dart';
+import 'new_chat_room_screen.dart';
+
 
 class GamerProfile {
   final int id;
@@ -79,71 +83,42 @@ class GamerProfile {
   }
 
   factory GamerProfile.fromJson(Map<String, dynamic> json) {
-    // 1. Парсимо ігри з урахуванням імені ТА картинки
-    final List<Map<String, String>> parsedGamesWithDetails = json['games'] is List
-        ? (json['games'] as List)
-        .where((item) => item is Map && item.containsKey('game') && item['game'] is Map)
-        .map((item) => {
-      'name': item['game']['name']?.toString() ?? 'Unknown',
-      'image': item['game']['image_url']?.toString() ?? '',
-    })
-        .toList()
-        : [];
-
-    // 2. Для зворотної сумісності (якщо десь у коді ще треба просто список назв)
-    final List<String> parsedGamesNames = parsedGamesWithDetails.map((g) => g['name']!).toList();
-
     return GamerProfile(
-      id: json['id'],
-      nickname: json['nickname']?.toString() ?? 'Unknown',
-      email: json['email']?.toString() ?? '',
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      nickname: (json['nickname'] ?? 'Unknown').toString(),
+      email: (json['email'] ?? '').toString(),
       avatar: json['avatar']?.toString(),
       isPro: json['is_pro'] == true,
 
-      // Встановлюємо нову структуру
-      gamesWithDetails: parsedGamesWithDetails,
-      // gamesList залишається для сумісності (якщо метод сортування ще його потребує)
-      gamesList: parsedGamesNames,
+      // Парсимо ігри з урахуванням того, що прийшло в консолі
+      gamesWithDetails: (json['games'] as List?)
+          ?.map((item) => {
+        'name': item['game']['name']?.toString() ?? 'Unknown',
+        'image': item['game']['image_url']?.toString() ?? '',
+      })
+          .toList() ?? [],
 
-      mainGame: parsedGamesNames.isNotEmpty ? parsedGamesNames.first : 'None',
+      gamesList: (json['games'] as List?)
+          ?.map((item) => item['game']['name'].toString())
+          .toList() ?? [],
 
-      tags: json['styles'] is List
-          ? (json['styles'] as List).map((s) => s['style'].toString()).toList()
-          : [],
+      mainGame: (json['games'] as List?)?.isNotEmpty == true
+          ? (json['games'] as List).first['game']['name'].toString()
+          : 'None',
 
+      tags: (json['styles'] as List?)?.map((s) => s['style'].toString()).toList() ?? [],
       platform: 'Unknown',
       chatType: 'Text',
-
-      languages: json['languages'] is List
-          ? (json['languages'] as List)
-          .where((item) => item is Map && item.containsKey('lang'))
-          .map((item) => item['lang'].toString())
-          .toList()
-          : [],
-
+      languages: (json['languages'] as List?)?.map((l) => l['lang'].toString()).toList() ?? [],
       hasVoice: json['voice_chat'] == true,
       isOnline: json['is_online'] == true,
-
-      platformsList: json['platforms'] is List
-          ? (json['platforms'] as List)
-          .where((item) => item is Map && item.containsKey('platform'))
-          .map((item) => item['platform'].toString())
-          .toList()
-          : [],
-
-      connectedPlatforms: json['accounts'] is List
-          ? Map.fromEntries((json['accounts'] as List)
-          .where((item) => item is Map && item.containsKey('service') && item.containsKey('username'))
-          .map((item) => MapEntry(item['service'].toString(), item['username'].toString())))
-          : {},
-
-      times: json['availability'] is List
-          ? (json['availability'] as List)
-          .where((item) => item is Map && item.containsKey('utc_hour'))
-          .map((item) => (item['utc_hour'] as num).toInt())
-          .toList()
-          : [],
-      rating: json['rating'] != null ? (json['rating'] as num).toDouble() : 0.0,
+      platformsList: (json['platforms'] as List?)?.map((p) => p['platform'].toString()).toList() ?? [],
+      connectedPlatforms: (json['accounts'] as List?)?.fold<Map<String, String>>({}, (map, item) {
+        map[item['service'].toString()] = item['username'].toString();
+        return map;
+      }) ?? {},
+      times: (json['availability'] as List?)?.map((a) => (a['utc_hour'] as num).toInt()).toList() ?? [],
+      rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
       password: '',
     );
   }
@@ -190,20 +165,35 @@ class GamerProfile {
     return score;
   }
 
-  String getBestGame(List<String> myActiveFilters) {
-    // Тепер використовуємо gamesWithDetails (список Map)
+  String getBestGame(List<String> activeFilters) {
     if (gamesWithDetails.isEmpty) return 'No games';
 
-    // 1. Спочатку пробуємо знайти ту гру, яка збігається з активними фільтрами
-    for (var gameMap in gamesWithDetails) {
-      String gameName = gameMap['name'] ?? '';
-      if (myActiveFilters.contains(gameName)) {
-        return gameName;
+    // 1. Отримуємо список ВАШИХ ігор (з сесії)
+    final myGames = UserSession().currentUser?.gamesList ?? [];
+
+    // 2. Створюємо список ігор, які є спільними у нас з гравцем
+    final commonGames = gamesWithDetails
+        .where((g) => myGames.contains(g['name']))
+        .toList();
+
+    // 3. Якщо є активний фільтр (activeFilters), намагаємося знайти гру,
+    // яка є і спільною, і входить у фільтр
+    if (activeFilters.isNotEmpty) {
+      final filteredCommon = commonGames.where((g) => activeFilters.contains(g['name'])).toList();
+      if (filteredCommon.isNotEmpty) {
+        return filteredCommon.first['name'] ?? 'Unknown';
       }
     }
 
-    // 2. Якщо збігів немає, повертаємо назву першої гри зі списку
-    return gamesWithDetails.first['name'] ?? 'No games';
+    // 4. Якщо фільтрів немає, або вони не збігаються,
+    // повертаємо першу зі списку СПІЛЬНИХ ігор
+    if (commonGames.isNotEmpty) {
+      return commonGames.first['name'] ?? 'Unknown';
+    }
+
+    // 5. Якщо взагалі немає спільних ігор (хоча матчі фільтруються за цим),
+    // повертаємо першу з будь-яких його ігор
+    return gamesWithDetails.first['name'] ?? 'Unknown';
   }
 
   int getExtraMatchesCount(List<String> myGames) {
@@ -247,6 +237,7 @@ class MatchProfile {
   });
 
   factory MatchProfile.fromJson(Map<String, dynamic> json) {
+    debugPrint("DEBUG JSON RATING: ${json['rating']}");
     return MatchProfile(
       id: json['id'],
       nickname: json['nickname'],
@@ -270,11 +261,17 @@ class MatchProfile {
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
 
+
   @override
   State<HomeFeedScreen> createState() => _HomeFeedScreenState();
 }
 
-class _HomeFeedScreenState extends State<HomeFeedScreen> {
+class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAliveClientMixin {
+
+  @override
+  bool get wantKeepAlive => true; // Кажемо Flutter "тримай цей екран у пам'яті"
+
+
   Future<void> _loadUserProfile() async {
     try {
       // 1. Отримуємо ID користувача, який ми зберегли при логіні
@@ -336,69 +333,99 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   }
 
   bool _isNotificationsOpen = false;
-  bool _hasUnreadNotifications = true;
+  bool _hasUnreadNotifications = false;
   List<GamerProfile> _loadedGamers = [];
   bool _isLoadingGamers = true;
   double _minRatingFilter = 0.0;
+  String _activeNotificationTab = 'All';
+
 
   // 1. Додаємо список для ігор поточного користувача
   List<Map<String, String>> _myAvailableGames = <Map<String, String>>[];
 
+  final SyncService _syncService = SyncService();
+
   @override
   void initState() {
     super.initState();
-    _loadUserProfile();
+    //Clean the matchs
+    AppState.shownIds.clear();
+    // Викликаємо дані лише якщо вони порожні
+    if (UserSession().currentUser == null) {
+      _loadUserProfile();
+    } else if (_loadedGamers.isEmpty) {
+      _loadGamers(); // Якщо профіль є, а матчів немає — завантажуємо
+    }
+
+    _fetchNotifications();
+    _syncService.startSync(() {
+      if (mounted) _fetchNotifications();
+    });
   }
 
+
   Future<void> _loadGamers() async {
+    if (!mounted) return;
     setState(() => _isLoadingGamers = true);
     try {
       final userId = await UserSession.getUserId();
       if (userId == null) return;
 
+      // 1. Формуємо базовий URL
+      String url = '${ApiConfig.baseUrl}/find-matches?current_user_id=$userId';
+
+      // 2. Якщо бекенд не вміє парсити "4,2", відправте ID по одному:
+      // ?excluded_ids=4&excluded_ids=2
+      if (AppState.shownIds.isNotEmpty) {
+        for (var id in AppState.shownIds) {
+          url += '&excluded_ids=$id';
+        }
+      }
+
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/find-matches?current_user_id=$userId'),
+        Uri.parse(url),
         headers: {"Content-Type": "application/json"},
       );
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-
-        // 1. Спочатку парсимо дані в MatchProfile
+        debugPrint("Отримано матчів: ${data.length}");
         List<MatchProfile> matches = data.map((json) => MatchProfile.fromJson(json)).toList();
 
-        // 2. Тепер перетворюємо їх у GamerProfile, використовуючи РЕАЛЬНІ дані з 'm'
         setState(() {
-          _loadedGamers = matches.map((m) => GamerProfile(
-            id: m.id,
-            nickname: m.nickname,
-            email: '',
-            avatar: m.avatar,
-            isPro: m.isPro,
-            isOnline: m.isOnline,
-            platform: m.platforms.isNotEmpty ? m.platforms.first : 'Unknown',
-            chatType: 'Text',
-            tags: m.styles,
-            languages: m.languages,
-            hasVoice: false,
-            connectedPlatforms: m.connectedPlatforms,
+          for (var m in matches) {
+            AppState.shownIds.add(m.id);
+          }
 
-            // ПЕРЕДАЄМО ОБИДВА ПОЛЯ:
-            // 1. Нова структура для картинок:
-            gamesWithDetails: m.games.map((g) => {
-              'name': g['game']['name'].toString(),
-              'image': g['game']['image_url'].toString(),
-            }).toList(),
-
-            // 2. Стара структура для фільтрів/сортування:
-            gamesList: m.games.map((g) => g['game']['name'].toString()).toList(),
-
-            platformsList: m.platforms,
-            times: m.availability,
-            rating: m.rating,
-            password: '',
-          )).toList();
+          _loadedGamers = matches.map((m) {
+            return GamerProfile(
+              id: m.id,
+              nickname: m.nickname,
+              email: '',
+              avatar: m.avatar,
+              isPro: m.isPro,
+              isOnline: m.isOnline,
+              platform: m.platforms.isNotEmpty ? m.platforms.first : 'Unknown',
+              chatType: 'Text',
+              tags: m.styles,
+              languages: m.languages,
+              hasVoice: false,
+              connectedPlatforms: m.connectedPlatforms,
+              gamesWithDetails: m.games.map((g) => {
+                'name': g['game']['name'].toString(),
+                'image': g['game']['image_url'].toString(),
+              }).toList(),
+              gamesList: m.games.map((g) => g['game']['name'].toString()).toList(),
+              platformsList: m.platforms,
+              times: m.availability,
+              rating: m.rating,
+              password: '',
+              mainGame: m.games.isNotEmpty ? m.games.first['game']['name'].toString() : 'None',
+            );
+          }).toList();
         });
+      } else {
+        debugPrint("Помилка сервера: ${response.statusCode}");
       }
     } catch (e) {
       debugPrint("Error loading matches: $e");
@@ -419,6 +446,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
   @override
   void dispose() {
+    _syncService.stopSync(); // ВАЖЛИВО: зупиняємо таймер, коли екран закривається
     _searchController.dispose();
     super.dispose();
   }
@@ -432,6 +460,54 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
       _selectedPlatforms.clear();
       _voiceChatOn = false;
       _minRatingFilter = 0.0; // Скидаємо фільтр рейтингу
+      AppState.shownIds.clear();
+    });
+  }
+
+
+  List<NotificationModel> _notifications = []; // Глобальний список для HomeFeed
+
+  Future<void> _fetchNotifications() async {
+    try {
+      final List<dynamic> data = await ApiService.getNotifications();
+      if (mounted) {
+        setState(() {
+          final newNotifications = data.map((json) => NotificationModel.fromJson(json)).toList();
+
+          // 1. ПЕРЕВІРКА НА НОВЕ:
+          // Якщо кількість повідомлень стала більшою, ніж була раніше,
+          // значить, прийшло щось нове — запалюємо крапку!
+          if (newNotifications.length > _notifications.length) {
+            _hasUnreadNotifications = true;
+          }
+
+          // 2. Якщо ми відкрили оверлей, ми "прочитали" все, що там було
+          if (_isNotificationsOpen) {
+            _hasUnreadNotifications = false;
+          }
+
+          _notifications = newNotifications;
+        });
+      }
+    } catch (e) {
+      print("Помилка: $e");
+    }
+  }
+
+  void _archiveCurrentTab() {
+    setState(() {
+      if (_activeNotificationTab == 'All') {
+        _notifications.clear();
+      } else {
+        NotificationType? typeToClear;
+        if (_activeNotificationTab == 'Match') typeToClear = NotificationType.match;
+        if (_activeNotificationTab == 'Rating') typeToClear = NotificationType.rating;
+        if (_activeNotificationTab == 'PRO') typeToClear = NotificationType.pro;
+
+        if (typeToClear != null) {
+          _notifications.removeWhere((n) => n.type == typeToClear);
+        }
+      }
     });
   }
 
@@ -452,6 +528,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     const accentColor = Color(0xFF00F5A0);
 
     final currentUser = UserSession().currentUser;
@@ -516,7 +593,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                         GestureDetector(
                           onTap: () {
                             _resetFilters();
-                            _loadUserProfile();
+                            //_loadUserProfile();
+                            _loadGamers();
                           },
                           // Прибираємо Container з BoxDecoration зовсім
                           child: Padding(
@@ -543,15 +621,27 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       ),
                     ),
                   )
-                      : ListView.builder( // <--- Тепер це звичайний ListView, без свайпу
+                      : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                     itemCount: filteredGamers.length,
                     itemBuilder: (context, index) {
+                      final gamer = filteredGamers[index];
+                      final bool isInviteAllowed = UserSession.canInvite(gamer.id);
+
                       return GamerCard(
-                        profile: filteredGamers[index],
+                        profile: gamer,
                         accentColor: accentColor,
                         activeGames: _confirmedActiveGames,
                         parentContext: context,
+                        onUpdate: () {
+                          if (mounted) setState(() {});
+                        },
+                        isInviteAllowed: isInviteAllowed, // Новий параметр
+                        onInviteSent: () {
+                          setState(() {
+                            UserSession.registerInvite(gamer.id);
+                          });
+                        },
                       );
                     },
                   ),
@@ -559,15 +649,73 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               ],
             ),
             if (_isGameDropdownOpen) _buildGamesDropdown(),
-            if (_isNotificationsOpen)
-              Positioned(
+            Visibility(
+              visible: _isNotificationsOpen,
+              child: Positioned(
                 top: 50,
                 left: 24,
                 right: 24,
                 child: NotificationsOverlay(
+                  notifications: _notifications,
                   onClose: () => setState(() => _isNotificationsOpen = false),
+                  activeTab: _activeNotificationTab, // Додайте цю змінну в стан State
+                  onTabChange: (tab) => setState(() => _activeNotificationTab = tab),
+                  onAccept: (item) async {
+                    bool success = await ApiService.acceptGameInvite(item.id);
+                    if (success && mounted) {
+                      setState(() => _notifications.removeWhere((n) => n.id == item.id));
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatRoomScreen(
+                            friendName: item.userNickname,
+                            friendId: item.senderId,
+                            onBack: () => Navigator.pop(context),
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  onRemove: (id) async {
+                    // ЗАМІСТЬ deleteNotification, викликаємо архівування:
+                    bool success = await ApiService.archiveNotification(id);
+                    if (success && mounted) {
+                      _fetchNotifications(); // Список оновиться і нотифікація зникне завдяки фільтру is_archived == False
+                    }
+                  },
+                  onArchiveAll: () async {
+                    // НОВА ЛОГІКА для кнопки Archive all
+                    bool success = await ApiService.archiveAllNotifications();
+                    if (success && mounted) {
+                      _fetchNotifications(); // Список оновиться і все зникне
+                    }
+                  },
+                  onProfileTap: (int gamerId) async {
+                    // 1. Отримуємо повний профіль гравця за його ID (або беремо з _loadedGamers)
+                    final profile = _loadedGamers.firstWhere((g) => g.id == gamerId);
+
+                    // 2. Навігація
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GamerProfileScreen(profile: profile),
+                      ),
+                    ).then((_) {
+                      // Коли користувач повертається з профілю,
+                      // оверлей або сам HomeFeed оновиться
+                      if (mounted) setState(() {});
+                    });
+                  },
+                  onDecline: (item) async {
+                    // ЦЕ НОВА ЛОГІКА: статус "declined" для сендера
+                    bool success = await ApiService.updateNotificationStatus(item.id, "declined");
+                    if (success) {
+                      _fetchNotifications(); // Оновлюємо, щоб сендер побачив "declined"
+                    }
+                  },
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -609,12 +757,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(currentUser.nickname),
               )
-                  : Center(
-                child: Text(
-                  currentUser?.nickname.isNotEmpty == true ? currentUser!.nickname[0].toUpperCase() : '?',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-              ),
+                  : _buildLetterAvatar(currentUser?.nickname ?? '?'), // ВИПРАВЛЕНО ТУТ
             ),
           ),
           const SizedBox(width: 4),
@@ -724,148 +867,154 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
       top: 54,
       left: 24,
       right: 24,
-      child: Container(
-        height: 302,
-        decoration: BoxDecoration(
-          color: const Color(0xFF181826),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF2B2B3B), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF181826).withValues(alpha: 0.25),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxHeight: 600, // Максимальна висота, після якої з'явиться прокрутка
         ),
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Expanded(
-              child: searchedGames.isEmpty
-                  ? const Center(
-                child: Text(
-                  'No matching games found.',
-                  style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 13),
-                ),
-              )
-                  : GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 0.75,
-                ),
-                itemCount: searchedGames.length,
-                itemBuilder: (context, index) {
-                  // Припустимо, тепер у вас список Map
-                  final game = searchedGames[index];
-                  final String gameName = game['name']!;
-                  final String gameImage = game['image']!;
-                  final isSelected = _temporarilySelectedGames.contains(gameName);
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF181826),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2B2B3B), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF181826).withValues(alpha: 0.25),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // Колонка стискається під вміст
+            children: [
+              Flexible(
+                child: searchedGames.isEmpty
+                    ? const Padding(
+                  padding: EdgeInsets.all(20.0),
+                  child: Text(
+                    'No matching games found.',
+                    style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 13),
+                  ),
+                )
+                    : GridView.builder(
+                  shrinkWrap: true, // GridView займає рівно стільки місця, скільки треба
+                  physics: const BouncingScrollPhysics(), // Плавна прокрутка
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 0.75,
+                  ),
+                  itemCount: searchedGames.length,
+                  itemBuilder: (context, index) {
+                    final game = searchedGames[index];
+                    final String gameName = game['name']!;
+                    final String gameImage = game['image']!;
+                    final isSelected = _temporarilySelectedGames.contains(gameName);
 
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        if (isSelected) {
-                          _temporarilySelectedGames.remove(gameName);
-                        } else {
-                          _temporarilySelectedGames.add(gameName);
-                        }
-                      });
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isSelected ? const Color(0xFF00F5A0) : Colors.transparent,
-                          width: 1.5,
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (isSelected) {
+                            _temporarilySelectedGames.remove(gameName);
+                          } else {
+                            _temporarilySelectedGames.add(gameName);
+                          }
+                        });
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected ? const Color(0xFF00F5A0) : Colors.transparent,
+                            width: 1.5,
+                          ),
                         ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          color: const Color(0xFF2B2B3B),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // ТУТ МИ МІНЯЄМО ІКОНКУ НА КАРТИНКУ:
-                              Expanded(
-                                child: gameImage.isNotEmpty
-                                    ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Image.network(
-                                    gameImage,
-                                    width: double.infinity, // Розтягується на всю ширину контейнера
-                                    height: double.infinity,
-                                    fit: BoxFit.cover, // Заповнює область гарно
-                                    errorBuilder: (c, o, s) => const Icon(Icons.gamepad, color: Colors.white30, size: 28),
-                                  ),
-                                )
-                                    : const Icon(Icons.gamepad, color: Colors.white30, size: 28),
-                              ),
-
-                              const SizedBox(height: 8),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                child: Text(
-                                  gameName,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 2, // Дозволяємо назві займати до 2 рядків
-                                  overflow: TextOverflow.ellipsis, // Якщо назва задовга — додасть "..."
-                                  style: TextStyle(
-                                    color: isSelected ? const Color(0xFF00F5A0) : Colors.white,
-                                    fontSize: 13,
-                                    fontFamily: 'Poppins',
-                                    fontWeight: FontWeight.w600,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            color: const Color(0xFF2B2B3B),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Expanded(
+                                  child: gameImage.isNotEmpty
+                                      ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.network(
+                                      gameImage,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, o, s) => const Icon(Icons.gamepad, color: Colors.white30, size: 28),
+                                    ),
+                                  )
+                                      : const Icon(Icons.gamepad, color: Colors.white30, size: 28),
+                                ),
+                                const SizedBox(height: 8),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                                  child: Text(
+                                    gameName,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isSelected ? const Color(0xFF00F5A0) : Colors.white,
+                                      fontSize: 13,
+                                      fontFamily: 'Poppins',
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 4), // Невеличкий відступ знизу, щоб текст не "прилипав" до краю
-                            ],
+                                const SizedBox(height: 4),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () async {
-                      // 1. Закриваємо дропдаун
-                      setState(() {
-                        _isGameDropdownOpen = false;
-                      });
-
-                      // 2. Переходимо на екран налаштувань
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const EditGameSelectionScreen()),
-                      );
-
-                      // 3. Після повернення — оновлюємо профіль, щоб підтягнути нові ігри
-                      _loadUserProfile();
-                    },
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
                     child: RichText(
                       text: TextSpan(
-                        style: const TextStyle(color: Colors.white60, fontSize: 11, fontFamily: 'Inter', height: 1.3),
                         children: [
-                          const TextSpan(text: 'Don’t see your game here? Manage your games in '),
+                          const TextSpan(
+                            text: "Don’t see your game here?\n",
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w400,
+                              height: 1.2,
+                              color: Color(0xFF8E8EA9),
+                            ),
+                          ),
+                          const TextSpan(
+                            text: "Manage your games in ",
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 17,
+                              fontWeight: FontWeight.w500,
+                              height: 1.2,
+                              color: Color(0xFF8E8EA9),
+                            ),
+                          ),
                           TextSpan(
                             text: 'Settings',
                             style: const TextStyle(
-                              color: Color(0xFF00F5A0),
+                              fontFamily: 'Inter',
+                              fontSize: 17,
                               fontWeight: FontWeight.w600,
-                              decoration: TextDecoration.underline,
+                              color: Color(0xFF00F5A0),
                             ),
-                            // Ось тут ми "вішаємо" обробник тільки на слово Settings
                             recognizer: TapGestureRecognizer()
                               ..onTap = () async {
                                 setState(() {
@@ -882,49 +1031,49 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _temporarilySelectedGames.isEmpty
-                      ? null
-                      : () {
-                    setState(() {
-                      _confirmedActiveGames = List.from(_temporarilySelectedGames);
-                      _isGameDropdownOpen = false;
-                      _searchController.clear();
-                    });
-                  },
-                  child: Container(
-                    width: 50,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF181826),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _temporarilySelectedGames.isNotEmpty
-                            ? const Color(0xFF00F5A0)
-                            : const Color(0xFF2B2B3B),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'GO',
-                        style: TextStyle(
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _temporarilySelectedGames.isEmpty
+                        ? null
+                        : () {
+                      setState(() {
+                        _confirmedActiveGames = List.from(_temporarilySelectedGames);
+                        _isGameDropdownOpen = false;
+                        _searchController.clear();
+                      });
+                    },
+                    child: Container(
+                      width: 75,
+                      height: 45,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF181826),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
                           color: _temporarilySelectedGames.isNotEmpty
                               ? const Color(0xFF00F5A0)
-                              : const Color(0xFF8E8EA9),
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
+                              : const Color(0xFF2B2B3B),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          'GO',
+                          style: TextStyle(
+                            color: _temporarilySelectedGames.isNotEmpty
+                                ? const Color(0xFF00F5A0)
+                                : const Color(0xFF8E8EA9),
+                            fontFamily: 'Inter',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1111,11 +1260,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   }
 }
 
-class GamerCard extends StatelessWidget {
+class GamerCard extends StatefulWidget {
   final GamerProfile profile;
   final Color accentColor;
   final List<String> activeGames;
   final BuildContext parentContext; // Додали context як аргумент
+  final VoidCallback onUpdate;
+  final bool isInviteAllowed;
+  final VoidCallback onInviteSent;
+
 
   const GamerCard({
     super.key,
@@ -1123,12 +1276,21 @@ class GamerCard extends StatelessWidget {
     required this.accentColor,
     required this.activeGames,
     required this.parentContext,
+    required this.onUpdate,
+    required this.isInviteAllowed,
+    required this.onInviteSent,
   });
 
   @override
+  State<GamerCard> createState() => _GamerCardState();
+}
+
+class _GamerCardState extends State<GamerCard> {
+
+  @override
   Widget build(BuildContext context) {
-    final String bestGame = profile.getBestGame(activeGames);
-    final int extraCount = profile.getExtraMatchesCount(activeGames);
+    final String bestGame = widget.profile.getBestGame(widget.activeGames);
+    final int extraCount = widget.profile.getExtraMatchesCount(widget.activeGames);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1136,7 +1298,7 @@ class GamerCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF181826),
         borderRadius: BorderRadius.circular(16),
-        border: profile.isPro ? Border.all(color: accentColor.withValues(alpha: 0.2), width: 1.5) : null,
+        border: widget.profile.isPro ? Border.all(color: widget.accentColor.withValues(alpha: 0.2), width: 1.5) : null,
       ),
       child: Column(
         children: [
@@ -1159,49 +1321,32 @@ class GamerCard extends StatelessWidget {
                             BoxShadow(
                               // Якщо онлайн — яскраве акцентне сяйво
                               // Якщо офлайн — глибока, "важча" сіра тінь (менше радіус, більше кольору)
-                              color: profile.isOnline
-                                  ? accentColor.withValues(alpha: 0.4) // Яскравіше для онлайн
+                              color: widget.profile.isOnline
+                                  ? widget.accentColor.withValues(alpha: 0.4) // Яскравіше для онлайн
                                   : const Color(0xFF505060).withValues(alpha: 0.4), // Темніший сірий для офлайн
-                              blurRadius: profile.isOnline ? 4 : 2, // Менше розмиття для офлайн — тінь стає чіткішою
-                              spreadRadius: profile.isOnline ? 2 : 3, // Не розповсюджуємо тінь для офлайн
+                              blurRadius: widget.profile.isOnline ? 4 : 2, // Менше розмиття для офлайн — тінь стає чіткішою
+                              spreadRadius: widget.profile.isOnline ? 2 : 3, // Не розповсюджуємо тінь для офлайн
                             ),
                           ],
                         ),
-                        // Властивості Flex для центрування тексту ("S")
-                        child:(profile.avatar != null && profile.avatar!.isNotEmpty)
+                        child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
                             ? ClipOval(
                           child: Image.asset(
-                            profile.avatar!,
+                            widget.profile.avatar!,
                             fit: BoxFit.cover,
                             width: 72,
                             height: 72,
                           ),
                         )
-
-                        :Center(
-                          child: Text(
-                            // Беремо першу літеру і переводимо у верхній регістр
-                            profile.nickname.isNotEmpty
-                                ? profile.nickname[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              fontFamily: 'Love Light',
-                              fontSize: 30,
-                              fontWeight: FontWeight.w400,
-                              color: profile.isOnline
-                                  ? const Color(0xFF00F5A0)
-                                  : const Color(0xFF8E8EA9),
-                            ),
-                          ),
-                        ),
+                            : _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),
                       ),
                       const SizedBox(height: 14),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9), shape: BoxShape.circle)), const SizedBox(width: 8), Text(profile.isOnline ? 'Online' : 'Offline', style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
+                          Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: widget.profile.isOnline ? widget.accentColor : const Color(0xFF8E8EA9), shape: BoxShape.circle)), const SizedBox(width: 8), Text(widget.profile.isOnline ? 'Online' : 'Offline', style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
                           const SizedBox(height: 10),
-                          Row(children: [Icon(profile.hasVoice ? Icons.mic : Icons.mic_off, color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), size: 16), const SizedBox(width: 6), Text('Voice', style: TextStyle(color: profile.hasVoice ? accentColor : const Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
+                          Row(children: [Icon(widget.profile.hasVoice ? Icons.mic : Icons.mic_off, color: widget.profile.hasVoice ? widget.accentColor : const Color(0xFF8E8EA9), size: 16), const SizedBox(width: 6), Text('Voice', style: TextStyle(color: widget.profile.hasVoice ? widget.accentColor : const Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500))]),
                         ],
                       ),
                     ],
@@ -1220,7 +1365,7 @@ class GamerCard extends StatelessWidget {
                             children: [
                               Flexible(
                                 child: Text(
-                                  profile.nickname,
+                                  widget.profile.nickname,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     color: Colors.white,
@@ -1230,12 +1375,12 @@ class GamerCard extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              if (profile.isPro) ...[
+                              if (widget.profile.isPro) ...[
                                 const SizedBox(width: 2),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
                                   decoration: BoxDecoration(
-                                    gradient: LinearGradient(colors: [accentColor, Color(0xFF0066FF)]),
+                                    gradient: LinearGradient(colors: [widget.accentColor, Color(0xFF0066FF)]),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: const Text(
@@ -1274,7 +1419,7 @@ class GamerCard extends StatelessWidget {
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
-                          children: profile.tags.map((t) => _buildTag(t)).toList(),
+                          children: widget.profile.tags.map((t) => _buildTag(t)).toList(),
                         ),
 
                         const SizedBox(height: 4),
@@ -1282,13 +1427,13 @@ class GamerCard extends StatelessWidget {
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
-                          children: profile.platformsList.map((p) => _buildTag(p)).toList(),
+                          children: widget.profile.platformsList.map((p) => _buildTag(p)).toList(),
                         ),
 
                         const SizedBox(height: 4),
 
                         Text(
-                          'Languages: ${profile.languages.join(" • ")}',
+                          'Languages: ${widget.profile.languages.join(" • ")}',
                           style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 13, fontWeight: FontWeight.w500),
                         ),
                       ],
@@ -1305,7 +1450,7 @@ class GamerCard extends StatelessWidget {
                     SizedBox(width: 4),
                     Text(
                       (UserSession().currentUser?.isPro ?? false)
-                          ? profile.rating.toStringAsFixed(1)
+                          ? widget.profile.rating.toStringAsFixed(1)
                           : 'PRO only',
                       style: TextStyle(
                         color: (UserSession().currentUser?.isPro ?? false)
@@ -1372,45 +1517,67 @@ class GamerCard extends StatelessWidget {
     };
   }
 
-  Widget _buildLetterAvatar() {
+  Widget _buildLetterAvatar(String nickname, bool isOnline) {
     return Center(
       child: Text(
-          profile.nickname[0].toUpperCase(),
-          style: TextStyle(
-              fontFamily: 'Love Light',
-              fontSize: 34,
-              color: profile.isOnline ? accentColor : const Color(0xFF8E8EA9)
-          )
+        nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
+        style: TextStyle(
+          fontFamily: 'Love Light',
+          fontSize: 30, // Можете поставити 34, як у вас в методі було
+          fontWeight: FontWeight.w400,
+          color: isOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9),
+        ),
       ),
     );
   }
 
   Widget _buildButton(String label, bool isAccent) {
+    // Визначаємо, чи це кнопка інвайту
+    final bool isInviteButton = label == 'Invite to play';
+    // Кнопка заблокована, якщо це інвайт ТА він заборонений (widget.isInviteAllowed == false)
+    final bool isDisabled = isInviteButton && !widget.isInviteAllowed;
+
     return GestureDetector(
-      onTap: () {
+      // Якщо isDisabled — onTap повертає null, кнопка не клікабельна
+      onTap: isDisabled
+          ? null
+          : () async {
         if (label == 'View profile') {
-          Navigator.push(
-            parentContext, // Використовуємо переданий контекст
-            MaterialPageRoute(
-              builder: (context) => GamerProfileScreen(profile: profile),
-            ),
-          );
+          await Navigator.push(
+            widget.parentContext,
+            MaterialPageRoute(builder: (context) => GamerProfileScreen(profile: widget.profile)),
+          ).then((_) {
+            // Ось тут правильний виклик callback-у:
+            widget.onUpdate();
+          });
         } else if (label == 'Invite to play') {
-          debugPrint("Invite sent to ${profile.nickname}");
+          await _showInviteDialog(context, widget.profile, widget.onInviteSent);
         }
       },
       child: Container(
         height: 44,
         decoration: BoxDecoration(
-            color: isAccent ? accentColor : Colors.transparent,
-            border: isAccent ? null : Border.all(color: accentColor),
-            borderRadius: BorderRadius.circular(12)
+          // Якщо кнопка заблокована - сірий колір, інакше - звичайний акцентний
+          color: isDisabled
+              ? Colors.grey.withOpacity(0.3)
+              : (isAccent ? widget.accentColor : Colors.transparent),
+          border: isAccent
+              ? null
+              : Border.all(color: isDisabled ? Colors.grey : widget.accentColor),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Center(
-            child: Text(
-                label,
-                style: TextStyle(color: isAccent ? const Color(0xFF0F0F1A) : accentColor, fontWeight: FontWeight.w700, fontSize: 15)
-            )
+          child: Text(
+            isDisabled ? 'Invite to play' : label, // Текст змінюється на таймер
+            style: TextStyle(
+              // Колір тексту: якщо isDisabled — сірий/білий, інакше як було
+              color: isDisabled
+                  ? Colors.grey
+                  : (isAccent ? const Color(0xFF0F0F1A) : widget.accentColor),
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
+          ),
         ),
       ),
     );
@@ -1421,5 +1588,84 @@ class GamerCard extends StatelessWidget {
     decoration: BoxDecoration(color: const Color(0xFF2B2B3B), borderRadius: BorderRadius.circular(6)),
     child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
   );
+
+  Future<void> _showInviteDialog(BuildContext context, GamerProfile profile, VoidCallback onInviteSent) async {
+    String? selectedGame;
+    bool _isSending = false; // Оголошуємо тут, щоб вона жила поки діалог відкритий
+
+    final myGames = UserSession().currentUser?.gamesList ?? [];
+    final commonGames = widget.profile.gamesList.where((g) => myGames.contains(g)).toList();
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+          backgroundColor: const Color(0xFF181826),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Invite to play in:', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                ...commonGames.map((game) => RadioListTile<String>(
+                  title: Text(game, style: const TextStyle(color: Colors.white)),
+                  value: game,
+                  groupValue: selectedGame,
+                  onChanged: _isSending ? null : (val) => setState(() => selectedGame = val),
+                  activeColor: const Color(0xFF00F5A0),
+                )),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                        onPressed: _isSending ? null : () => Navigator.pop(context),
+                        child: const Text('Cancel')
+                    ),
+                    ElevatedButton(
+                      onPressed: (selectedGame == null || _isSending) ? null : () async {
+                        setState(() => _isSending = true); // Блокуємо відправку
+
+                        bool success = await ApiService.sendInvite(widget.profile.id, selectedGame!);
+
+                        if (success) {
+                          widget.onInviteSent();
+                          Navigator.pop(context);
+                        } else {
+                          if (mounted) setState(() => _isSending = false); // Розблоковуємо при помилці
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
+                      child: _isSending
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black))
+                          : const Text('Send', style: TextStyle(color: Colors.black)),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+
+}
+
+class SyncService {
+  Timer? _timer;
+
+  void startSync(Function onSync) {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      onSync();
+    });
+  }
+
+  void stopSync() {
+    _timer?.cancel();
+  }
 }
 

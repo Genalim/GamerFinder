@@ -2,18 +2,20 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'custom_widgets.dart';
 import 'chat_add_friend_group_screen.dart';
-import 'models.dart';
+import 'gamer_profile_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String friendName;
+  final String? friendId;
   final VoidCallback onBack;
-  final List<FriendItem> allFriends;
+  final String? initialMessage;
 
   const ChatRoomScreen({
     super.key,
     required this.friendName,
     required this.onBack,
-    required this.allFriends,
+    this.friendId,
+    this.initialMessage,
   });
 
   @override
@@ -30,6 +32,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void initState() {
     super.initState();
     _currentBg = _backgrounds[Random().nextInt(_backgrounds.length)];
+    if (widget.initialMessage != null) _textController.text = widget.initialMessage!;
     _textController.addListener(() {
       final isEmpty = _textController.text.trim().isEmpty;
       if (_isInputEmpty != isEmpty) setState(() => _isInputEmpty = isEmpty);
@@ -44,11 +47,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Знаходимо поточного друга для отримання даних аватара та статусу
-    final friend = widget.allFriends.firstWhere(
-          (f) => f.name == widget.friendName,
-      orElse: () => FriendItem(name: widget.friendName, status: 'offline', initial: widget.friendName[0]),
-    );
+    // Універсальна ініціалізація ініціалів
+    final String initial = widget.friendName.isNotEmpty ? widget.friendName[0].toUpperCase() : '?';
 
     return Material(
       color: const Color(0xFF0F0F13),
@@ -60,7 +60,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             resizeToAvoidBottomInset: false,
             body: Column(
               children: [
-                _buildHeader(friend),
+                _buildHeader(initial),
                 const Expanded(child: Center(child: Text("No messages yet", style: TextStyle(color: Color(0xFF8E8EA9))))),
                 Padding(
                   padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, left: 16, right: 16),
@@ -74,7 +74,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  Widget _buildHeader(FriendItem friend) {
+  Widget _buildHeader(String initial) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 57, 12, 0),
       child: Row(
@@ -83,37 +83,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           GestureDetector(onTap: widget.onBack, child: const SizedBox(width: 40, height: 40, child: ChatBackIcon(size: 24))),
           Row(
             children: [
-              // Аватарка
-              Container(
-                width: 32, height: 32,
-                decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
-                child: Center(child: Text(friend.initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 18, color: Color(0xFF00F5A0)))),
+              GestureDetector(
+                onTap: () {
+                  if (widget.friendId != null) {
+                    // ВИКОРИСТОВУЄМО НАШ НОВИЙ СТАТИЧНИЙ МЕТОД
+                    GamerProfileScreen.openFromId(context, widget.friendId!);
+                  }
+                },
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
+                  child: Center(child: Text(initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 18, color: Color(0xFF00F5A0)))),
+                ),
               ),
               const SizedBox(width: 8),
-              // Ім'я та статус
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(friend.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  Text(friend.isOnline ? "online" : "offline", style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 10)),
+                  Text(widget.friendName, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  const Text("online", style: TextStyle(color: Color(0xFF00F5A0), fontSize: 10)),
                 ],
               ),
             ],
           ),
-          GestureDetector(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => ChatAddFriendsGroupScreen(
-                    onClose: () => Navigator.of(context).pop(),
-                    currentFriendName: widget.friendName,
-                    friendsList: widget.allFriends,
-                  ),
-                ),
-              );
-            },
-            child: const ChatAddGroupIcon(size: 42),
-          ),
+          const ChatAddGroupIcon(size: 42),
         ],
       ),
     );

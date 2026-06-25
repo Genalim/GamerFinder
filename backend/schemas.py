@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr
 from typing import List, Dict, Optional
 import json
@@ -146,3 +148,21 @@ class PlaystylePreferenceRequest(BaseModel):
     styles: List[str]
     times: List[int]
     voice_chat: bool
+
+class NotificationCreate(BaseModel):
+    recipient_id: int
+    game: str
+    message: str
+
+class NotificationResponse(BaseModel):
+    id: str
+    recipient_id: int
+    sender_id: int
+    message: str
+    type: str
+    state: str
+    game: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True # Це замінило orm_mode = True у Pydantic V2

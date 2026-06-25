@@ -19,6 +19,30 @@ class GamerProfileScreen extends StatefulWidget {
   final GamerProfile profile;
   const GamerProfileScreen({super.key, required this.profile});
 
+  // ВСТАВТЕ ЦЕЙ МЕТОД ВСЕРЕДИНУ КЛАСУ GamerProfileScreen
+  static Future<void> openFromId(BuildContext context, String userId) async {
+    // Показуємо спінер (лоадер) для кращого UX
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0))),
+    );
+
+    try {
+      final profileData = await ApiService.getUserProfile(userId);
+      if (context.mounted) {
+        Navigator.pop(context); // Ховаємо спінер
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => GamerProfileScreen(profile: profileData)),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) Navigator.pop(context); // Ховаємо спінер у разі помилки
+      print("Помилка відкриття профілю: $e");
+    }
+  }
+
   @override
   State<GamerProfileScreen> createState() => _GamerProfileScreenState();
 }
@@ -147,6 +171,66 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
     );
   }
 
+  Future<void> _showInviteDialog(BuildContext context, GamerProfile profile, VoidCallback onInviteSent) async {
+    String? selectedGame;
+    bool _isSending = false;
+
+    final myGames = UserSession().currentUser?.gamesList ?? [];
+    final commonGames = profile.gamesList.where((g) => myGames.contains(g)).toList();
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Dialog(
+          backgroundColor: const Color(0xFF181826),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Invite to play in:', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                ...commonGames.map((game) => RadioListTile<String>(
+                  title: Text(game, style: const TextStyle(color: Colors.white)),
+                  value: game,
+                  groupValue: selectedGame,
+                  onChanged: _isSending ? null : (val) => setModalState(() => selectedGame = val),
+                  activeColor: const Color(0xFF00F5A0),
+                )),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                        onPressed: _isSending ? null : () => Navigator.pop(context),
+                        child: const Text('Cancel')
+                    ),
+                    ElevatedButton(
+                      onPressed: (selectedGame == null || _isSending) ? null : () async {
+                        setModalState(() => _isSending = true); // Блокуємо відправку
+                        bool success = await ApiService.sendInvite(profile.id, selectedGame!);
+                        if (success && mounted) {
+                          onInviteSent(); // Це оновить стан через Callback
+                          Navigator.pop(context);
+                        } else {
+                          if (mounted) setModalState(() => _isSending = false);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
+                      child: _isSending
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black))
+                          : const Text('Send', style: TextStyle(color: Colors.black)),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPlaceholder(Color statusColor) {
     return Center(
       child: Text(
@@ -178,49 +262,37 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         Stack(
           alignment: Alignment.center,
           children: [
-            // 1. Шар великого сяйва (це і є ваше drop-shadow)
+            // 1. Шар сяйва
             Container(
-              width: 100,
-              height: 100,
+              width: 100, height: 100,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
                     color: statusColor.withOpacity(0.6),
-                    blurRadius: 8,
-                    spreadRadius: -2,
+                    blurRadius: 8, spreadRadius: -2,
                   ),
                 ],
               ),
             ),
-            // 2. Аватарка (БЕЗ жорсткої рамки Border)
+            // 2. Аватарка або Буква
             Container(
-              width: 100,
-              height: 100,
+              width: 100, height: 100,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                // Замість Border.all ми додаємо внутрішню тінь або ледь помітний інший ефект,
-                // АБО просто обрізаємо картинку.
-                // Якщо треба саме підсвічений край — додайте сюди BoxShadow з малим blur:
+                color: const Color(0xFF181826), // Ваш стандартний темний колір фону
                 boxShadow: [
-                  BoxShadow(
-                    color: statusColor,
-                    blurRadius: 0.2, // Дуже тонкий м'який контур замість жорсткого Border
-                    spreadRadius: 0,
-                  ),
+                  BoxShadow(color: statusColor, blurRadius: 0.2),
                 ],
               ),
-              child: ClipOval(
-                child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
-                    ? Image.asset(
+              child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
+                  ? ClipOval(
+                child: Image.asset(
                   widget.profile.avatar!,
-                  width: 100,
-                  height: 100,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => _buildPlaceholder(statusColor),
-                )
-                    : _buildPlaceholder(statusColor),
-              ),
+                  width: 100, height: 100, fit: BoxFit.cover,
+                ),
+              )
+                  : _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),
             ),
           ],
         ),
@@ -366,6 +438,20 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildLetterAvatar(String nickname, bool isOnline) {
+    return Center(
+      child: Text(
+        nickname.isNotEmpty ? nickname[0].toUpperCase() : 'G',
+        style: TextStyle(
+          fontFamily: 'Love Light',
+          fontSize: 50, // Збільшено для розміру 100px аватара
+          fontWeight: FontWeight.w400,
+          color: isOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9),
+        ),
+      ),
     );
   }
 
@@ -841,22 +927,26 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         Row(
           children: List.generate(5, (index) {
             return GestureDetector(
-              onTap: //_hasRatedGamer
-              //? null
-                  () async {
-                final success = await ApiService.rateUser(
-                    widget.profile.id,
-                    index + 1
-                );
+              onTap: () async {
+                // 1. Одразу міняємо інтерфейс, щоб користувач бачив результат кліку
+                setState(() {
+                  _currentProfileRating = index + 1;
+                  _hasRatedGamer = true;
+                });
+
+                // 2. Відправляємо запит на сервер
+                final success = await ApiService.rateUser(widget.profile.id, index + 1);
 
                 if (success && mounted) {
-                  setState(() {
-                    _currentProfileRating = index + 1;
-                    _hasRatedGamer = true;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Оцінку успішно збережено')),
-                  );
+                  // 3. ЯК ТІЛЬКИ сервер підтвердив успіх,
+                  // ми викликаємо _fetchStatus(), щоб він завантажив СВІЖИЙ середній рейтинг
+                  await _fetchStatus();
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Rating updated!')),
+                    );
+                  }
                 }
               },
               child: Padding(
@@ -1026,6 +1116,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
 
   // МЕТОД 7: Нижні кнопки дій
   Widget _buildActionButtons(Color accentColor) {
+    final bool isEnabled = UserSession.canInvite(widget.profile.id);
     return Row(
       children: [
         Expanded(
@@ -1050,13 +1141,37 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: Container(
-            height: 48,
-            decoration: BoxDecoration(color: accentColor, borderRadius: BorderRadius.circular(12)),
-            child: const Center(
-              child: Text(
-                'Invite to play',
-                style: TextStyle(color: Color(0xFF0F0F1A), fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 15),
+          child: GestureDetector(
+            onTap: isEnabled
+                ? () async {
+              // Викликаємо діалог інвайту
+              await _showInviteDialog(context, widget.profile, () {
+                setState(() {
+                  // Реєструємо інвайт у глобальному стані
+                  UserSession.registerInvite(widget.profile.id);
+                  // 2. Оновлюємо інтерфейс профілю (перемальовуємо кнопки)
+                  setState(() {});
+                });
+              });
+            }
+                : null, // Якщо не дозволено, нічого не станеться
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                // Якщо вимкнено — сірий колір, якщо ввімкнено — акцентний
+                color: isEnabled ? accentColor : Colors.grey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Text(
+                  isEnabled ? 'Invite to play' : 'Invite to play',
+                  style: TextStyle(
+                      color: isEnabled ? const Color(0xFF0F0F1A) : Colors.white,
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15
+                  ),
+                ),
               ),
             ),
           ),

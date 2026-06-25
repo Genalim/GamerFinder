@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
 import 'user_session.dart';
+import 'Home_Feed_screen.dart';
+import 'notifications_overlay.dart';
 
 class ApiService {
   // Базові заголовки з токеном
@@ -128,6 +130,161 @@ class ApiService {
       print('Помилка при отриманні рейтингу: $e');
     }
     return {"rating": 0, "is_rated": false};
+  }
+
+ //====Оповіщення Match
+  static Future<bool> sendInvite(int targetId, String gameName) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/send-invite'),
+      headers: {"Content-Type": "application/json", "Authorization": "Bearer ${UserSession().token}"},
+      body: jsonEncode({
+        "recipient_id": targetId, // Передаємо як ціле число (int)
+        "game": gameName,
+        "message": "Invited you to play"
+      }),
+    );
+    return response.statusCode == 200;
+  }
+
+  static Future<bool> acceptInvite(String inviteId) async {
+    final response = await http.post(Uri.parse('${ApiConfig.baseUrl}/accept-invite/$inviteId'));
+    return response.statusCode == 200;
+  }
+
+  static Future<List<dynamic>> getNotifications() async {
+    try {
+      final token = await UserSession.getToken();
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/notifications'),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body); // Повертаємо список JSON-об'єктів
+      } else {
+        return []; // Повертаємо порожній список у разі помилки
+      }
+    } catch (e) {
+      print("Error fetching notifications: $e");
+      return [];
+    }
+  }
+
+  static Future<bool> updateNotificationStatus(String notificationId, String newStatus) async {
+    try {
+      // Додаємо ?new_status=... в кінець URL
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/notifications/$notificationId/update-status?new_status=$newStatus'),
+        headers: await getHeaders(), // Використовуйте свої заголовки з токеном!
+      );
+
+      if (response.statusCode == 200) return true;
+      return false;
+    } catch (e) {
+      print("Exception при оновленні статусу: $e");
+      return false;
+    }
+  }
+
+  static Future<bool> deleteNotification(String id) async {
+    final token = UserSession().token;
+    final response = await http.delete(
+      Uri.parse('${ApiConfig.baseUrl}/notifications/$id'),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+    );
+    return response.statusCode == 200;
+  }
+
+  static Future<bool> acceptGameInvite(String inviteId) async {
+    final token = UserSession().token;
+    final response = await http.patch( // Використовуємо PATCH, як у вас на бекенді
+      Uri.parse('${ApiConfig.baseUrl}/notifications/$inviteId/accept'),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+    );
+    return response.statusCode == 200;
+  }
+
+  static Future<GamerProfile> getUserProfile(String userId) async {
+    // Замініть URL на ваш реальний ендпоінт для отримання профілю
+    final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/users/$userId/profile'));
+
+    if (response.statusCode == 200) {
+      // Припускаємо, що у вас є метод fromJson у моделі GamerProfile
+      return GamerProfile.fromJson(json.decode(response.body));
+    } else {
+      throw Exception('Не вдалося завантажити профіль');
+    }
+  }
+
+  //Archivation methods
+  static Future<bool> _patchRequest(String url) async {
+    final token = UserSession().token;
+    try {
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}$url'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Помилка запиту ($url): $e");
+      return false;
+    }
+  }
+  static Future<bool> archiveNotification(String id) =>
+      _patchRequest('/notifications/$id/archive');
+
+  static Future<bool> archiveAllNotifications() =>
+      _patchRequest('/notifications/archive-all');
+
+  static Future<List<NotificationModel>> getHistory() async {
+    final token = UserSession().token;
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/notifications/history'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        List body = json.decode(response.body);
+        return body.map((e) => NotificationModel.fromJson(e)).toList();
+      }
+    } catch (e) {
+      print("Помилка отримання історії: $e");
+    }
+    return [];
+  }
+
+  // 2. Остаточне видалення всього архіву
+  static Future<bool> deleteAllHistory() async {
+    final token = UserSession().token;
+    try {
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/notifications/history/clear'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Помилка видалення історії: $e");
+      return false;
+    }
   }
 
 }

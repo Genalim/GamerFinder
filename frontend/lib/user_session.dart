@@ -1,6 +1,10 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'Home_Feed_screen.dart'; // або де в тебе лежить модель GamerProfile
 
+class AppState {
+  static Set<int> shownIds = {};
+}
+
 class UserSession {
   // Синглтон
   static final UserSession _instance = UserSession._internal();
@@ -47,4 +51,22 @@ class UserSession {
   static void setToken(String token) {
     _token = token;
   }
+
+
+  //====== Invite send synchronization start ====////:
+  static final Map<int, DateTime> sentInvites = {};
+
+  // Метод для перевірки, чи пройшло 10 хвилин
+  static bool canInvite(int gamerId) {
+    if (!sentInvites.containsKey(gamerId)) return true;
+    final lastInvite = sentInvites[gamerId]!;
+    return DateTime.now().difference(lastInvite).inMinutes >= 10;
+  }
+
+  // Метод для фіксації успішного інвайту
+  static void registerInvite(int gamerId) {
+    sentInvites[gamerId] = DateTime.now();
+  }
+  //====== Invite send synchronization end ====////:
+
 }

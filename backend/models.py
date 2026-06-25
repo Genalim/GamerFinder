@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float, DateTime, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -28,26 +28,30 @@ class User(Base):
 
 class UserAvailability(Base):
     __tablename__ = "user_availability"
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    # Додаємо index=True для швидкого пошуку за user_id
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True, index=True)
     utc_hour = Column(Integer, primary_key=True)
 
 class UserPlatforms(Base):
     __tablename__ = "user_platforms"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    # Обов'язково додаємо index
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     platform = Column(String)
 
 class UserLanguages(Base):
     __tablename__ = "user_languages"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    # Обов'язково додаємо index
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     lang = Column(String)
 
 class UserGames(Base):
     __tablename__ = "user_games"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    game_id = Column(Integer, ForeignKey("games.id"))
+    # Обов'язково додаємо index
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), index=True)
     style = Column(String)
     game = relationship("Game")
 
@@ -69,7 +73,8 @@ class Game(Base):
 class UserStyles(Base):
     __tablename__ = "user_styles"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    # Обов'язково додаємо index
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     style = Column(String)
 
 class Friendship(Base):
@@ -93,4 +98,31 @@ class UserRating(Base):
     # Зв'язки (опціонально, за бажанням)
     rater = relationship("User", foreign_keys=[rater_id])
     rated_user = relationship("User", foreign_keys=[rated_user_id])
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, index=True)
+    recipient_id = Column(Integer, ForeignKey("users.id"))
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    message = Column(String)
+    type = Column(String) # match, rating, pro
+    state = Column(String, default="pending")
+    game = Column(String)
+    created_at = Column(DateTime, default=func.now())
+    is_archived = Column(Boolean, default=False)
+
+    # Зв'язки
+    sender = relationship("User", foreign_keys=[sender_id])
+    recipient = relationship("User", foreign_keys=[recipient_id])
+
+class RatingRequest(Base):
+    __tablename__ = "rating_requests"
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    game_id = Column(Integer, ForeignKey("games.id"))
+    created_at = Column(DateTime, default=func.now())
+    is_notification_sent = Column(Boolean, default=False) # Щоб відправити лише 1 раз
+    is_rated = Column(Boolean, default=False)
 

@@ -156,7 +156,7 @@ class _ChatListWidgetState extends State<ChatListWidget> {
         builder: (context) => ChatRoomScreen(
           friendName: name,
           onBack: () => Navigator.pop(context),
-          allFriends: _allFriends, // Передаємо список друзів
+          // Параметр allFriends видалено, бо ChatRoomScreen тепер універсальний
         ),
       ),
     );

@@ -71,16 +71,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _selectedAvatarPath = user?.avatar;
 
     if (user != null) {
+      // ВАЖЛИВО: Перевірте, чи назви сервісів у вашій БД (connectedPlatforms)
+      // точно збігаються з ключами в _platformControllers
       user.connectedPlatforms.forEach((service, username) {
-        if (_platformControllers.containsKey(service)) {
-          _platformControllers[service]?.text = username;
-          _pValid[service] = true;
-          _pMsgs[service] = "$service linked";
-          _pColors[service] = const Color(0xFF00F5A0);
+        // Приводимо до нижнього регістру для порівняння, якщо треба
+        String key = _platformControllers.keys.firstWhere(
+                (k) => k.toLowerCase() == service.toLowerCase(),
+            orElse: () => ''
+        );
+
+        if (key.isNotEmpty) {
+          _platformControllers[key]?.text = username;
+          _pValid[key] = true;
+          _pMsgs[key] = "$key linked";
+          _pColors[key] = const Color(0xFF00F5A0);
         }
       });
     }
-
+    print("User connected platforms: ${user?.connectedPlatforms}");
     // Встановлюємо початкові підказки для порожніх платформ
     for (var p in _platformControllers.keys) {
       if (_pValid[p] != true) {
@@ -518,7 +526,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               bool isSelected = tempPath == path;
 
                               return GestureDetector(
-                                onTap: () => setModalState(() => tempPath = path),
+                                onTap: () {
+                                  // Додаємо перевірку: якщо таб PRO, але юзер не PRO — нічого не робимо
+                                  if (!_isFreeTab && !(UserSession().currentUser?.isPro ?? false)) {
+                                    return;
+                                  }
+                                  setModalState(() => tempPath = path);
+                                },
                                 child: RepaintBoundary(
                                   child: Container(
                                     decoration: BoxDecoration(
@@ -539,7 +553,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                             cacheWidth: 150,
                                             filterQuality: FilterQuality.low,
                                           ),
-                                          if (!_isFreeTab) ...[
+                                          if (!_isFreeTab && !(UserSession().currentUser?.isPro ?? false)) ...[
                                             Container(color: Colors.black.withOpacity(0.6)),
                                             const Center(child: Icon(Icons.lock_outline, color: Colors.white24, size: 22)),
                                           ],
@@ -551,7 +565,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               );
                             },
                           ),
-                          if (!_isFreeTab)
+                          if (!_isFreeTab && !(UserSession().currentUser?.isPro ?? false))
                             Positioned(
                               bottom: 185, left: 0, right: 0,
                               child: IgnorePointer(

@@ -84,8 +84,8 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
               MaterialPageRoute(
                 builder: (context) => ChatRoomScreen(
                   friendName: friend.name,
+                  // Тут можна передати ID, якщо він є у FriendItem, або null
                   onBack: () => Navigator.pop(context),
-                  allFriends: _friends,
                 ),
               ),
             );
