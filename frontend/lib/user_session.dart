@@ -8,7 +8,9 @@ class AppState {
 class UserSession {
   // Синглтон
   static final UserSession _instance = UserSession._internal();
+
   factory UserSession() => _instance;
+
   UserSession._internal();
 
   // Додаємо гетер instance, щоб можна було писати UserSession.instance
@@ -38,6 +40,7 @@ class UserSession {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
     _instance.currentUser = null;
+    _instance._sentInvites.clear(); // Очищаємо інвайти конкретної сесії
   }
 
 
@@ -54,19 +57,30 @@ class UserSession {
 
 
   //====== Invite send synchronization start ====////:
-  static final Map<int, DateTime> sentInvites = {};
+  final Map<String, DateTime> _sentInvites = {};
 
-  // Метод для перевірки, чи пройшло 10 хвилин
-  static bool canInvite(int gamerId) {
-    if (!sentInvites.containsKey(gamerId)) return true;
-    final lastInvite = sentInvites[gamerId]!;
-    return DateTime.now().difference(lastInvite).inMinutes >= 10;
+  // Метод перевірки (тепер екземплярний)
+  bool canInvite(int gamerId) {
+    final myId = currentUser?.id;
+    if (myId == null) return true;
+
+    // Ключ із ID юзера — це те, що вирішує проблему "бачу чужі інвайти"
+    final key = "${myId}_$gamerId";
+
+    if (!_sentInvites.containsKey(key)) return true;
+
+    return DateTime.now().difference(_sentInvites[key]!).inMinutes >= 10;
   }
 
-  // Метод для фіксації успішного інвайту
-  static void registerInvite(int gamerId) {
-    sentInvites[gamerId] = DateTime.now();
+  // Метод реєстрації (тепер екземплярний)
+  void registerInvite(int gamerId) {
+    final myId = currentUser?.id;
+    if (myId != null) {
+      final key = "${myId}_$gamerId";
+      _sentInvites[key] = DateTime.now();
+    }
   }
-  //====== Invite send synchronization end ====////:
+//====== Invite send synchronization end ====////:
 
 }
+

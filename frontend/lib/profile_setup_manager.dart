@@ -26,6 +26,10 @@ class ProfileSetupManager {
   // === МЕТОД ДЛЯ КОНВЕРТАЦІЇ ЧАСУ В UTC ГОДИНИ ===
   List<int> get utcHours {
     Set<int> hours = {};
+
+    // ЗАВЖДИ беремо актуальний час пристрою в момент конвертації
+    final currentOffset = DateTime.now().timeZoneOffset.inHours;
+
     final Map<String, List<int>> timeMap = {
       'Morning': [6, 7, 8, 9, 10, 11],
       'Afternoon': [12, 13, 14, 15, 16, 17],
@@ -36,8 +40,8 @@ class ProfileSetupManager {
     for (var category in selectedTimes) {
       if (timeMap.containsKey(category)) {
         for (int localHour in timeMap[category]!) {
-          // Формула: UTC = (LocalHour - Offset + 24) % 24
-          int utcHour = (localHour - timezoneOffset + 24) % 24;
+          // Тепер ми використовуємо актуальний currentOffset
+          int utcHour = (localHour - currentOffset + 24) % 24;
           hours.add(utcHour);
         }
       }

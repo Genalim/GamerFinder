@@ -276,11 +276,24 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       onPressed: selectedGame == null ? null : () async {
                         bool success = await ApiService.sendInvite(friend.userId, selectedGame!);
                         if (success && mounted) {
-                          onInviteSent(); // Оновлює стан у FriendsScreen
+                          UserSession.instance.registerInvite(friend.userId); // Оновлюємо локально
+                          onInviteSent();
                           Navigator.pop(context);
+                        } else {
+                          // Додаємо SnackBar, якщо сервер відмовив (наприклад 429)
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Wait 10 minutes before next invite")),
+                            );
+                          }
                         }
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
+                      style: ElevatedButton.styleFrom(
+                        // ОСЬ ТУТ МАГІЯ:
+                        backgroundColor: (selectedGame == null)
+                            ? Colors.grey.withOpacity(0.3)
+                            : const Color(0xFF00F5A0),
+                      ),
                       child: const Text('Send', style: TextStyle(color: Colors.black)),
                     ),
                   ],
@@ -551,7 +564,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   // =============================================================================
   Widget _buildFriendCard(FriendItem friend) {
     final bool amIPro = UserSession().currentUser?.isPro ?? false;
-    final bool canInvite = UserSession.canInvite(friend.userId);
+    final bool canInvite = UserSession.instance.canInvite(friend.userId);
     return Container(
       width: 327,
       height: 110,
@@ -698,36 +711,36 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 const SizedBox(width: 23),
                 Expanded(
                   child: GestureDetector(
-                    onTap: (canInvite && !_isProcessing) // БЛОКУЄМО КНОПКУ, ЯКЩО ЙДЕ ЗАПИТ
-                        ? () async {
-                      setState(() => _isProcessing = true); // БЛОКУЄМО ІНШІ ЗАПИТИ
-                      await _showInviteDialog(context, friend, () {
-                        setState(() {
-                          UserSession.registerInvite(friend.userId);
+                      onTap: (canInvite && !_isProcessing)
+                          ? () async {
+                        setState(() => _isProcessing = true);
+                        await _showInviteDialog(context, friend, () {
+                          setState(() {
+                            UserSession.instance.registerInvite(friend.userId);
+                          });
                         });
-                      });
-                      setState(() => _isProcessing = false); // РОЗБЛОКУЄМО
-                    }
-                        : null,
-                    child: Container(
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: canInvite ? const Color(0xFF00F5A0) : Colors.grey.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Center(
-                        child: Text(
-                          'Invite to play',
-                          style: TextStyle( // ПРИБРАЛИ const
-                            // Динамічний колір: чорний якщо можна запросити, білий якщо ні
-                            color: canInvite ? const Color(0xFF0F0F1A) : Colors.white,
-                            fontFamily: 'Inter',
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
+                        setState(() => _isProcessing = false);
+                      }
+                          : null,
+                      child: Container(
+                        height: 32,
+                        decoration: BoxDecoration(
+                          // ВИПРАВЛЕНО: Сірий колір, якщо не можна інвайтити
+                          color: canInvite ? const Color(0xFF00F5A0) : Colors.grey.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Invite to play',
+                            style: TextStyle(
+                              color: canInvite ? const Color(0xFF0F0F1A) : Colors.white,
+                              fontFamily: 'Inter',
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    ),
+                      )
                   ),
                 ),
               ],

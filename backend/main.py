@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import Query
 
 
+
 from database import get_db, engine, Base
 from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
@@ -38,18 +39,30 @@ from schemas import (
 )
 #Function for changing pending to expired.
 async def update_expired_notifications(db: AsyncSession):
-    ten_minutes_ago = datetime.utcnow() - timedelta(minutes=10)
+    now = datetime.utcnow()
 
-    # Оновлюємо статус
+    # 1. Оновлюємо Match (інвайти): 10 хвилин
     await db.execute(
         update(Notification)
         .where(
             Notification.state == "pending",
-            Notification.created_at < ten_minutes_ago
+            Notification.type == "match",  # Чітко для матчів
+            Notification.created_at < (now - timedelta(minutes=10))
         )
         .values(state="expired")
     )
-    # Зберігаємо зміни
+
+    # 2. Оновлюємо Rating: 3 дні (як ти хотів)
+    await db.execute(
+        update(Notification)
+        .where(
+            Notification.state == "pending",
+            Notification.type == "rating",  # Чітко для рейтингів
+            Notification.created_at < (now - timedelta(days=3))
+        )
+        .values(state="expired")
+    )
+
     await db.commit()
 
 # 1. СПОЧАТКУ функція lifespan
@@ -845,69 +858,60 @@ async def get_user_evaluations(
     return response
 
 #Notifications for match
-@app.post("/send-invite")
+@app.post("/send-invite", status_code=status.HTTP_201_CREATED)
 async def send_invite(
         data: NotificationCreate,
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # 1. ЗАХИСТ ВІД КЛІКЕРА (10 хвилин)
+    # 1. Захист 10 хвилин
     ten_minutes_ago = datetime.utcnow() - timedelta(minutes=10)
-    exists = await db.execute(
-        select(Notification).filter(
-            Notification.sender_id == current_user_id,
-            Notification.recipient_id == data.recipient_id,
-            Notification.created_at >= ten_minutes_ago,
-            Notification.state == "pending"
-        )
-    )
-    if exists.scalars().first():
-        raise HTTPException(status_code=429, detail="Wait 10 minutes before sending another invite")
 
-    # 2. ЛІМІТ 3 ІНВАЙТИ НА ДОБУ
+    # Використовуй .scalar_one_or_none() для отримання одного результату
+    query = select(Notification).filter(
+        Notification.sender_id == current_user_id,
+        Notification.recipient_id == data.recipient_id,
+        Notification.created_at >= ten_minutes_ago,
+        Notification.state == "pending",
+        Notification.type == "match"
+    )
+    result = await db.execute(query)
+    if result.scalars().first():
+        raise HTTPException(
+            status_code=429,
+            detail="Wait 10 minutes before sending another invite"
+        )
+
+    # 2. Ліміт 3 інвайти на добу
     day_ago = datetime.utcnow() - timedelta(hours=24)
-    result = await db.execute(
-        select(func.count(Notification.id)).filter(
-            Notification.sender_id == current_user_id,
-            Notification.recipient_id == data.recipient_id,
-            Notification.created_at >= day_ago
-        )
+    count_query = select(func.count(Notification.id)).filter(
+        Notification.sender_id == current_user_id,
+        Notification.recipient_id == data.recipient_id,
+        Notification.created_at >= day_ago
     )
-    count = result.scalar()
+    count_result = await db.execute(count_query)
+    if (count_result.scalar() or 0) >= 3:
+        raise HTTPException(
+            status_code=429,
+            detail="Limit exceeded (3 invites per 24h)"
+        )
 
-    if count >= 3:
-        raise HTTPException(status_code=429, detail="Limit exceeded (3 invites per 24h)")
-    # Явно перетворюємо current_user_id на int,
-    # щоб бути впевненим, що SQLAlchemy передасть число в БД
-    sender_id_int = int(current_user_id)
-
+    # 3. Створення нотифікації
     new_notif = Notification(
         id=str(uuid.uuid4()),
         recipient_id=data.recipient_id,
-        sender_id=sender_id_int,  # Використовуємо int тут!
+        sender_id=int(current_user_id),
         message=data.message,
         type="match",
         state="pending",
-        game=data.game
+        game=data.game,
+        created_at=datetime.utcnow() # Краще явно встановити час, якщо модель не робить це сама
     )
+
     db.add(new_notif)
     await db.commit()
-    return {"status": "success"}
 
-@app.post("/accept-invite/{invite_id}")
-async def accept_invite(
-        invite_id: str,
-        db: AsyncSession = Depends(get_db)
-):
-    # Використовуємо асинхронний select
-    result = await db.execute(select(Notification).filter(Notification.id == invite_id))
-    notif = result.scalars().first()
-
-    if notif:
-        notif.state = "accepted"
-        await db.commit()
-        return {"status": "accepted"}
-    raise HTTPException(status_code=404, detail="Not found")
+    return {"status": "success", "message": "Invite sent successfully"}
 
 @app.get("/notifications")
 async def get_my_notifications(
@@ -919,7 +923,7 @@ async def get_my_notifications(
 
     # 2."Лінива" перевірка RatingRequests
     # Шукаємо всі запити, які вже "дозріли" (пройшла 1 година)
-    threshold = datetime.utcnow() - timedelta(hours=1)
+    threshold = datetime.utcnow() - timedelta(minutes=3)
 
     stmt_reqs = select(RatingRequest).filter(
         or_(RatingRequest.sender_id == current_user_id, RatingRequest.receiver_id == current_user_id),
@@ -1025,7 +1029,7 @@ async def delete_notification(
 
     # 3. ЗАХИСТ: Дозволяємо видалення тільки якщо вона в історії (is_archived)
     # АБО якщо це expired інвайт
-    if not notif.is_archived and notif.state != "expired":
+    if not notif.is_archived and notif.state != "expired" and notif.type != "rating":
         raise HTTPException(
             status_code=403,
             detail="Cannot delete active notification. Archive it first."
@@ -1088,7 +1092,7 @@ async def archive_notification(id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Not found")
 
     # ЗАБОРОНА: Не можна архівувати pending інвайти
-    if notif.state == "pending":
+    if notif.state == "pending" and notif.type != "rating":
         raise HTTPException(status_code=400, detail="Cannot archive pending invite")
 
     notif.is_archived = True
@@ -1097,19 +1101,32 @@ async def archive_notification(id: str, db: AsyncSession = Depends(get_db)):
 
 @app.patch("/notifications/archive-all")
 async def archive_all_notifications(
+        notification_type: Optional[str] = None, # 'match', 'rating', 'pro', тощо
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # Архівуємо все, де ми отримувач (крім pending)
-    # АБО все, де ми відправник (accepted/declined)
+    # Базова умова (твоя поточна логіка прав доступу)
+    base_access_condition = or_(
+        (Notification.recipient_id == current_user_id) &
+        or_(Notification.state != "pending", Notification.type == "rating"),
+
+        (Notification.sender_id == current_user_id) &
+        (Notification.state.in_(["accepted", "declined"]))
+    )
+
+    # Додаткова умова для фільтрації по типу
+    type_condition = True # Якщо None, ігноруємо фільтр
+    if notification_type:
+        type_condition = (Notification.type == notification_type)
+
+    # Комбінуємо все разом
     stmt = (
         update(Notification)
-        .where(
-            ((Notification.recipient_id == current_user_id) & (Notification.state != "pending")) |
-            ((Notification.sender_id == current_user_id) & (Notification.state.in_(["accepted", "declined"])))
-        )
+        .where(base_access_condition)
+        .where(type_condition) # Додаємо фільтрацію типу
         .values(is_archived=True)
     )
+
     await db.execute(stmt)
     await db.commit()
     return {"status": "ok"}
@@ -1140,12 +1157,34 @@ async def get_notifications_history(
         .options(selectinload(Notification.sender), selectinload(Notification.recipient))
         .filter(
             (Notification.recipient_id == current_user_id) | (Notification.sender_id == current_user_id),
-            Notification.is_archived == True  # ТІЛЬКИ АРХІВНІ
+            Notification.is_archived == True
         )
         .order_by(Notification.created_at.desc())
     )
     result = await db.execute(stmt)
-    return result.scalars().all()
+    notifications = result.scalars().all()
+
+    # Формуємо відповідь точно так само, як в активних нотифікаціях
+    response = []
+    for notif in notifications:
+        is_i_am_sender = (notif.sender_id == current_user_id)
+        other_user = notif.recipient if is_i_am_sender else notif.sender
+
+        response.append({
+            "id": notif.id,
+            "sender_id": notif.sender_id,
+            "user_nickname": other_user.nickname if other_user else "Unknown",
+            "is_sender_online": other_user.is_online if other_user else False,
+            "is_sender_pro": other_user.is_pro if other_user else False,
+            "sender_rating": float(other_user.rating) if other_user and other_user.rating else 0.0,
+            "message": notif.message,
+            "state": notif.state,
+            "type": notif.type,
+            "game": notif.game,
+            "time": notif.created_at.isoformat() if notif.created_at else ""
+        })
+
+    return response
 
 
 

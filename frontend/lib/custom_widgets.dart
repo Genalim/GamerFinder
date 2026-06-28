@@ -636,46 +636,31 @@ class FigmaRatingStar extends StatelessWidget {
 class FigmaArchiveCheckbox extends StatelessWidget {
   final bool isChecked;
 
-  const FigmaArchiveCheckbox({
-    super.key,
-    required this.isChecked,
-  });
+  const FigmaArchiveCheckbox({super.key, required this.isChecked});
 
   @override
   Widget build(BuildContext context) {
-    // Твій SVG код із Figma (розмір 21x21)
-    const String svgString = '''
-<svg width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M19.698 6.45C19.75 7.5 19.75 8.75 19.75 10.25C19.75 14.728 19.75 16.968 18.359 18.359C16.968 19.75 14.729 19.75 10.25 19.75C5.772 19.75 3.532 19.75 2.141 18.359C0.75 16.968 0.75 14.729 0.75 10.25C0.75 5.772 0.75 3.532 2.141 2.141C3.532 0.75 5.771 0.75 10.25 0.75C11.322 0.75 12.266 0.75 13.1 0.77" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round"/>
+    // Рамка без галочки (тільки контур квадрата з розривом)
+    const String emptySvg = '''
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M21.448 8.2C21.5 9.25 21.5 10.5 21.5 12C21.5 16.478 21.5 18.718 20.109 20.109C18.718 21.5 16.479 21.5 12 21.5C7.522 21.5 5.282 21.5 3.891 20.109C2.5 18.718 2.5 16.479 2.5 12C2.5 7.522 2.5 5.282 3.891 3.891C5.282 2.5 7.521 2.5 12 2.5C13.072 2.5 14.016 2.5 14.85 2.52" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
+''';
+
+    // Повний SVG (квадрат + галочка як єдиний набір контурів)
+    const String filledSvg = '''
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M21.448 8.2C21.5 9.25 21.5 10.5 21.5 12C21.5 16.478 21.5 18.718 20.109 20.109C18.718 21.5 16.479 21.5 12 21.5C7.522 21.5 5.282 21.5 3.891 20.109C2.5 18.718 2.5 16.479 2.5 12C2.5 7.522 2.5 5.282 3.891 3.891C5.282 2.5 7.521 2.5 12 2.5C13.072 2.5 14.016 2.5 14.85 2.52" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M8 11.5C8 11.5 9.5 11.5 11.5 15C11.5 15 16.559 5.833 21.5 4" stroke="#00F5A0" stroke-opacity="0.7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 ''';
 
     return SizedBox(
-      width: 20,
-      height: 20,
-      child: Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none, // Дозволяє галочці красиво виходити за межі рамки
-        children: [
-          // Базова рамка (твій кастомний SVG)
-          SvgPicture.string(
-            svgString,
-            width: 20,
-            height: 20,
-          ),
-
-          // Якщо активовано — малюємо галочку поверх розриву
-          if (isChecked)
-            Positioned(
-              top: -3,   // Зміщуємо трохи вгору, щоб вона сіла точно в розрив кута
-              right: -3, // Зміщуємо праворуч, як у Figma
-              child: Icon(
-                Icons.done_rounded,
-                size: 16,
-                color: const Color(0xFF00F5A0).withOpacity(0.9),
-              ),
-            ),
-        ],
+      width: 24,
+      height: 24,
+      child: SvgPicture.string(
+        isChecked ? filledSvg : emptySvg,
+        fit: BoxFit.contain, // Забезпечує правильне масштабування без втрати чіткості
       ),
     );
   }

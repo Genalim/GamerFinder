@@ -35,11 +35,12 @@ class _HistoryScreenState extends State<HistoryScreen> with NotificationCardsMix
       backgroundColor: const Color(0xFF0F0F1A),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('History', style: TextStyle(color: Colors.white)),
+        title: const Text('History', style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w600,)),
         actions: [
           TextButton(
             onPressed: () async {

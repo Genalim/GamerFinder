@@ -210,10 +210,18 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                         setModalState(() => _isSending = true); // Блокуємо відправку
                         bool success = await ApiService.sendInvite(profile.id, selectedGame!);
                         if (success && mounted) {
-                          onInviteSent(); // Це оновить стан через Callback
+                          // Якщо сервер дозволив - оновлюємо локальний таймер
+                          UserSession.instance.registerInvite(profile.id);
+                          onInviteSent();
                           Navigator.pop(context);
                         } else {
-                          if (mounted) setModalState(() => _isSending = false);
+                          // ЯКЩО СЕРВЕР ПОВЕРНУВ ПОМИЛКУ (наприклад, 429), показуємо SnackBar
+                          if (mounted) {
+                            setModalState(() => _isSending = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Wait 10 minutes before next invite")),
+                            );
+                          }
                         }
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
@@ -1116,7 +1124,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
 
   // МЕТОД 7: Нижні кнопки дій
   Widget _buildActionButtons(Color accentColor) {
-    final bool isEnabled = UserSession.canInvite(widget.profile.id);
+    final bool isEnabled = UserSession.instance.canInvite(widget.profile.id);
     return Row(
       children: [
         Expanded(
@@ -1148,7 +1156,7 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               await _showInviteDialog(context, widget.profile, () {
                 setState(() {
                   // Реєструємо інвайт у глобальному стані
-                  UserSession.registerInvite(widget.profile.id);
+                  UserSession.instance.registerInvite(widget.profile.id);
                   // 2. Оновлюємо інтерфейс профілю (перемальовуємо кнопки)
                   setState(() {});
                 });

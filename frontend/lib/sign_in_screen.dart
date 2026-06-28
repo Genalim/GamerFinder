@@ -64,37 +64,40 @@ class _SignInScreenState extends State<SignInScreen> {
         final data = json.decode(response.body);
 
         final userId = data['id'];
-        // ПРИПУСКАЮ, що токен приходить у полі 'access_token' або 'token'
-        // Перевірте логи в консолі, щоб дізнатися точне ім'я поля!
         final token = data['access_token'];
 
         if (userId == null) {
           throw Exception("ID юзера відсутній");
         }
 
-        // Зберігаємо ID
         await UserSession.saveUserId(userId);
 
-        // ВАЖЛИВО: Зберігаємо токен!
         if (token != null) {
           UserSession.setToken(token);
           print("Токен успішно збережено в UserSession");
         }
 
         if (mounted) {
+          // Ми не скидаємо _isLoading = false, бо екран перестане існувати
           Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => MainNavigationScreen())
           );
         }
-      }else {
-        setState(() => _errorMessage = 'Невірний нік або пароль (код: ${response.statusCode})');
+      } else {
+        // Скидаємо тут, бо ми залишаємося на цьому ж екрані
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Wrong Nick or Password (code: ${response.statusCode})';
+        });
       }
     } catch (e) {
-      print("ПОМИЛКА: $e");
-      setState(() => _errorMessage = 'Сталася помилка: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      print("ERROR: $e");
+      // Скидаємо тут, бо ми залишаємося на цьому ж екрані
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Error: $e';
+      });
     }
   }
 

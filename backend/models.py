@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float, DateTime, func
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float, DateTime, func, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -125,4 +128,28 @@ class RatingRequest(Base):
     created_at = Column(DateTime, default=func.now())
     is_notification_sent = Column(Boolean, default=False) # Щоб відправити лише 1 раз
     is_rated = Column(Boolean, default=False)
+
+#Chats
+class Chat(Base):
+    __tablename__ = 'chats'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=True) # Назва групи
+    is_group = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ChatMember(Base):
+    __tablename__ = 'chat_members'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
+    user_id = Column(UUID(as_uuid=True)) # ID твого юзера
+    role = Column(String, default='member') # 'admin' або 'member'
+
+class Message(Base):
+    __tablename__ = 'messages'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
+    sender_id = Column(UUID(as_uuid=True))
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_read = Column(Boolean, default=False)
 

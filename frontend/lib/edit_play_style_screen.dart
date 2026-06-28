@@ -49,21 +49,21 @@ class _EditPlayStyleScreenState extends State<EditPlayStyleScreen> {
     super.initState();
     final user = UserSession().currentUser;
 
+    final offset = DateTime.now().timeZoneOffset.inHours;
+
     // 1. Підтягуємо стилі гри (використовуємо поле tags замість неіснуючого styles)
     _selectedStyles = Set.from(user?.tags ?? []);
 
     // 2. Конвертуємо години (times) з профілю назад у текстові слоти
     Set<String> mappedTimes = {};
-    for (var hour in user?.times ?? []) {
-      if (hour >= 6 && hour < 12) {
-        mappedTimes.add('Morning');
-      } else if (hour >= 12 && hour <= 17) {
-        mappedTimes.add('Afternoon');
-      } else if (hour >= 18 && hour < 23) {
-        mappedTimes.add('Evening');
-      } else {
-        mappedTimes.add('Late night');
-      }
+    for (var utcHour in user?.times ?? []) {
+      // Конвертуємо UTC з бази в локальний час користувача
+      int localHour = (utcHour + offset) % 24;
+
+      if (localHour >= 6 && localHour < 12) mappedTimes.add('Morning');
+      else if (localHour >= 12 && localHour < 18) mappedTimes.add('Afternoon');
+      else if (localHour >= 18 && localHour < 23) mappedTimes.add('Evening');
+      else mappedTimes.add('Late night');
     }
     _selectedTimes = mappedTimes;
 
@@ -83,12 +83,25 @@ class _EditPlayStyleScreenState extends State<EditPlayStyleScreen> {
 
   // Метод конвертації слотів у години та відправки на бекенд
   List<int> _convertTimesToHours(Set<String> times) {
-    Set<int> hours = {};
-    if (times.contains('Morning')) hours.addAll([8, 9, 10]);
-    if (times.contains('Afternoon')) hours.addAll([13, 14, 15]);
-    if (times.contains('Evening')) hours.addAll([19, 20, 21]);
-    if (times.contains('Late night')) hours.addAll([1, 2, 3]);
-    return hours.toList();
+    final user = UserSession().currentUser;
+    final offset = DateTime.now().timeZoneOffset.inHours;
+    //print("--- DEBUG ---");
+    //print("Current Offset: $offset");
+
+    Set<int> localHours = {};
+    if (times.contains('Morning')) localHours.addAll([6, 7, 8, 9, 10, 11]);
+    if (times.contains('Afternoon')) localHours.addAll([12, 13, 14, 15, 16, 17]);
+    if (times.contains('Evening')) localHours.addAll([18, 19, 20, 21, 22]);
+    if (times.contains('Late night')) localHours.addAll([23, 0, 1, 2, 3, 4, 5]);
+
+    // Конвертуємо в UTC для бази
+    List<int> utcHours = localHours.map((h) => (h - offset + 24) % 24).toSet().toList();
+
+    //debugPrint("Local Hours: $localHours");
+    // debugPrint("Resulting UTC Hours: $utcHours");
+    // debugPrint("-------------");
+
+    return utcHours;
   }
 
   Future<void> _applyChanges() async {

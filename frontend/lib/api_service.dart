@@ -143,7 +143,7 @@ class ApiService {
         "message": "Invited you to play"
       }),
     );
-    return response.statusCode == 200;
+    return response.statusCode == 200 || response.statusCode == 201;
   }
 
   static Future<bool> acceptInvite(String inviteId) async {
@@ -245,8 +245,25 @@ class ApiService {
   static Future<bool> archiveNotification(String id) =>
       _patchRequest('/notifications/$id/archive');
 
-  static Future<bool> archiveAllNotifications() =>
-      _patchRequest('/notifications/archive-all');
+  static Future<bool> archiveAllNotifications({String? notificationType}) async {
+    String url = '${ApiConfig.baseUrl}/notifications/archive-all';
+    if (notificationType != null) {
+      url += '?notification_type=$notificationType';
+    }
+
+    final token = await UserSession.getToken();
+    final Map<String, String> headers = {
+      "Content-Type": "application/json",
+      if (token != null) "Authorization": "Bearer $token",
+    };
+
+    final response = await http.patch(
+      Uri.parse(url),
+      headers: headers,
+    );
+
+    return response.statusCode == 200;
+  }
 
   static Future<List<NotificationModel>> getHistory() async {
     final token = UserSession().token;

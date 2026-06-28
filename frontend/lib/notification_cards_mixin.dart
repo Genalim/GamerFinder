@@ -3,8 +3,20 @@ import 'notifications_overlay.dart';
 import 'custom_widgets.dart';
 import 'user_session.dart';
 import 'api_service.dart';
+import 'package:intl/intl.dart';
 
 mixin NotificationCardsMixin {
+
+  String formatTime(DateTime time) {
+    try {
+      //print("DEBUG: Time in model is: $time");
+      //print("DEBUG: Timezone offset is: ${time.timeZoneOffset}");
+      // Форматуємо як dd-MM-yyyy HH:mm
+      return DateFormat('dd-MM-yyyy HH:mm').format(time);
+    } catch (e) {
+      return time.toString();
+    }
+  }
 
   // Цей метод ми залишаємо, щоб у самому оверлеї було зручно викликати картки
   Widget buildFigmaCard(
@@ -46,15 +58,19 @@ mixin NotificationCardsMixin {
       decoration: BoxDecoration(color: const Color(0xFF0F0F1A), border: Border.all(color: borderColor, width: 0.5), borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
-          Row(children: [
-            Icon(Icons.sports_esports, size: 14, color: borderColor),
-            const SizedBox(width: 6),
-            const Text('Play invite', style: TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'Inter')),
-            const Spacer(),
-            FigmaCloseButton(onTap: () => onRemove(item.id)),
-            const SizedBox(width: 8), // Невеликий відступ від краю
-            Text(item.time, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
-          ]),
+          Row(
+            children: [
+              Icon(Icons.sports_esports, size: 14, color: borderColor),
+              const SizedBox(width: 6),
+              const Text('Play invite', style: TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'Inter')),
+              const Spacer(),
+              // Тепер час іде першим (ближче до центру)
+              Text(formatTime(item.time), style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
+              const SizedBox(width: 8),
+              // Хрестик тепер крайній справа
+              FigmaCloseButton(onTap: () => onRemove(item.id)),
+            ],
+          ),
           const SizedBox(height: 10),
           Wrap(
             alignment: WrapAlignment.center,
@@ -143,6 +159,8 @@ mixin NotificationCardsMixin {
               const SizedBox(width: 6),
               const Text('Your Play Invite was accepted', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
               const Spacer(),
+              Text(formatTime(item.time), style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
+              const SizedBox(width: 8),
               FigmaCloseButton(onTap: () => onRemove(item.id)),
             ],
           ),
@@ -229,50 +247,48 @@ mixin NotificationCardsMixin {
               const SizedBox(width: 6),
               const Text('Your Play Invite was declined', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
               const Spacer(),
+              Text(formatTime(item.time), style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
+              const SizedBox(width: 8),
               FigmaCloseButton(onTap: () => onRemove(item.id)),
             ],
           ),
           const SizedBox(height: 10),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => onProfileTap(int.parse(item.senderId)),
-              child: RichText(
-                text: TextSpan(
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 12,
-                    height: 1.0,
-                    letterSpacing: 0.6,
-                  ),
-                  children: [
-                    TextSpan(
-                        text: '${item.userNickname} ',
-                        style: const TextStyle(
-                            color: Color(0xFFFF6B6B), // Червоний акцент для Declined
-                            fontWeight: FontWeight.w600
-                        )
-                    ),
-                    const TextSpan(
-                        text: 'declined your invite to ',
-                        style: TextStyle(
-                            color: Color(0xFFB8B8C6),
-                            fontWeight: FontWeight.w400
-                        )
-                    ),
-                    TextSpan(
-                        text: item.game,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600
-                        )
-                    ),
-                  ],
+          GestureDetector(
+            onTap: () => onProfileTap(int.parse(item.senderId)),
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  height: 1.0,
+                  letterSpacing: 0.6,
                 ),
+                children: [
+                  TextSpan(
+                      text: '${item.userNickname} ',
+                      style: const TextStyle(
+                          color: Color(0xFFFF6B6B), // Червоний акцент для Declined
+                          fontWeight: FontWeight.w600
+                      )
+                  ),
+                  const TextSpan(
+                      text: 'declined your invite to ',
+                      style: TextStyle(
+                          color: Color(0xFFB8B8C6),
+                          fontWeight: FontWeight.w400
+                      )
+                  ),
+                  TextSpan(
+                      text: item.game,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600
+                      )
+                  ),
+                ],
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          FigmaCloseButton(onTap: () => onRemove(item.id)),
         ],
       ),
     );
@@ -299,7 +315,7 @@ mixin NotificationCardsMixin {
               const SizedBox(width: 6),
               const Text('Rate your last teammate', style: TextStyle(color: Colors.white, fontSize: 11)),
               const Spacer(),
-              Text(item.time, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
+              Text(formatTime(item.time), style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 9)),
               const SizedBox(width: 8),
               FigmaCloseButton(onTap: () => onRemove(item.id)),
             ],
@@ -328,15 +344,25 @@ mixin NotificationCardsMixin {
               GestureDetector(
                 onTap: (item.currentRating > 0 && !item.isRated)
                     ? () async {
-                  // 1. Відправляємо на бекенд
+                  // 1. Зберігаємо ID і миттєво оновлюємо UI (оптимістично)
+                  final String idToRemove = item.id;
+
+                  // Тимчасово ставимо Rated = true, щоб кнопка змінилася миттєво
+                  item.isRated = true;
+                  onUpdate();
+
+                  // 2. Відправляємо рейтинг
                   final success = await ApiService.rateUser(int.parse(item.senderId), item.currentRating);
 
                   if (success) {
-                    // 2. Якщо сервер відповів ОК — одразу видаляємо картку з UI
-                    onRemove(item.id);
+                    await ApiService.deleteNotification(idToRemove);
 
-                    // 3. Додатково можна додати сповіщення (Snackbar), що рейтинг успішно відправлено
-                    // Але головне — onRemove прибере її зі списку NotificationsOverlay
+                    // викликаємо он ремув з оверлею, в якому робимо оновлення екрану.
+                    onRemove(idToRemove);
+                  } else {
+                    // Якщо сервер помилився, повертаємо назад
+                    item.isRated = false;
+                    onUpdate();
                   }
                 }
                     : null,

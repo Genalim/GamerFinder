@@ -14,7 +14,7 @@ class NotificationModel {
   final String message;
   final NotificationType type;
   NotificationState state;
-  final String time;
+  final DateTime time;
   final String game;
   final String senderId;
   final bool isSenderOnline;
@@ -39,13 +39,24 @@ class NotificationModel {
   bool isRated = false;
 
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
+    // 1. Отримуємо рядок з JSON
+    String timeString = json['time'] ?? DateTime.now().toUtc().toIso8601String();
+
+    // 2. Якщо в рядку немає 'Z' і немає '+', додаємо 'Z', щоб Dart сприйняв це як UTC
+    if (!timeString.contains('Z') && !timeString.contains('+')) {
+      timeString += 'Z';
+    }
+
+    // 3. Парсимо та переводимо в локальний час
+    DateTime utcTime = DateTime.parse(timeString).toLocal();
+
     return NotificationModel(
       id: json['id'].toString(),
       userNickname: json['user_nickname'] ?? 'Unknown',
       message: json['message'] ?? '',
       type: _parseNotificationType(json['type']),
       state: _parseNotificationState(json['state']),
-      time: json['time'] ?? '',
+      time: utcTime,
       game: json['game'] ?? '',
       senderId: json['sender_id'].toString(),
       isSenderOnline: json['is_sender_online'] ?? false,
@@ -80,7 +91,7 @@ class NotificationsOverlay extends StatefulWidget {
   final VoidCallback onClose;
   final Function(NotificationModel) onAccept;
   final Function(String) onRemove;
-  final Function() onArchiveAll;
+  final Function(List<String> ids, String tabName) onArchiveAll;
   final String activeTab;
   final Function(String) onTabChange;
   final Function(int) onProfileTap;
@@ -124,65 +135,111 @@ class _NotificationsOverlayState extends State<NotificationsOverlay> with Notifi
         border: Border.all(color: const Color(0xFF2B2B3B), width: 1.0),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min, // Колонка тепер стискається до вмісту
         children: [
-          Container(padding: const EdgeInsets.fromLTRB(16, 14, 16, 4), child: Row(children: [const Text('Notifications', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600, fontFamily: 'Inter')), const Spacer(), FigmaCloseButton(onTap: widget.onClose)])),
-          Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: ['Match', 'Rating', 'PRO', 'All'].map((t) => _buildFigmaTab(t)).toList())),
-          const Divider(color: Color(0xFF2B2B3B), height: 1),
-          Flexible(
-            child: filtered.isEmpty
-                ? _buildFigmaEmptyState(context)
-                : ListView.builder(
-                shrinkWrap: true, padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
-                itemCount: filtered.isNotEmpty ? filtered.length + 1 : filtered.length,
-                itemBuilder: (context, index) {
-                  if (filtered.isNotEmpty && index == filtered.length) {
-                    return _buildArchiveAllButton(); // Показуємо лише якщо є що архівувати
-                  }
-                  return buildFigmaCard(
-                    filtered[index],
-                    onAccept: widget.onAccept,
-                    onRemove: widget.onRemove,
-                    onDecline: widget.onDecline,
-                    onProfileTap: widget.onProfileTap,
-                    onUpdate: () => setState(() {}),
-                  );
-                }
-            ),
+          Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Row(
+                  children: [
+                    const Text('Notifications', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600, fontFamily: 'Inter')),
+                    const Spacer(),
+                    FigmaCloseButton(onTap: widget.onClose)
+                  ]
+              )
           ),
+          Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: ['Match', 'Rating', 'PRO', 'All'].map((t) => _buildFigmaTab(t)).toList()
+              )
+          ),
+          const Divider(color: Color(0xFF2B2B3B), height: 1),
+
+          // Тепер контент не розтягується примусово
+          if (filtered.isEmpty)
+            SizedBox(
+              height: 146,
+              child: Center(child: _buildFigmaEmptyState(context)),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                  shrinkWrap: true, // Дозволяє списку займати лише необхідну висоту
+                  padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    return buildFigmaCard(
+                      filtered[index],
+                      onAccept: widget.onAccept,
+                      onRemove: (String id) async {
+                        final item = widget.notifications.firstWhere((n) => n.id == id);
+
+                        if (item.type == NotificationType.rating) {
+                          // Просто видаляємо з UI (використовуємо твій метод, який ти вже створив)
+                          _deleteRatingLocally(id);
+                        } else {
+                          // Стандартна логіка для матчів (викликаємо те, що прийшло з батька)
+                          widget.onRemove(id);
+                        }
+                      },
+                      onDecline: widget.onDecline,
+                      onProfileTap: widget.onProfileTap,
+                      onUpdate: () => setState(() {}),
+                    );
+                  }
+              ),
+            ),
+
+          _buildArchiveAllButton(filtered),
         ],
       ),
     );
   }
 
+  void _deleteRatingLocally(String id) {
+    setState(() {
+      widget.notifications.removeWhere((n) => n.id == id);
+    });
+  }
 
-  Widget _buildArchiveAllButton() {
+  Widget _buildArchiveAllButton(List<NotificationModel> filtered) {
+    bool isListEmpty = filtered.isEmpty;
+    bool isChecked = isListEmpty || _isArchiving;
+    String text = isListEmpty ? 'Archived' : 'Archive all';
+
     return Padding(
       padding: const EdgeInsets.only(top: 6, bottom: 10, right: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           GestureDetector(
-            onTap: () async {
-              setState(() => _isArchiving = true);
+            onTap: isListEmpty ? null : () async {
+              final List<String> idsToArchive = filtered.map((n) => n.id).toList();
+
+              setState(() {
+                _isArchiving = true;
+                widget.notifications.removeWhere((n) => idsToArchive.contains(n.id));
+              });
+
               try {
-                await widget.onArchiveAll();
+                // ПЕРЕДАЄМО ids ТА activeTab
+                await widget.onArchiveAll(idsToArchive, widget.activeTab);
               } catch (e) {
-                // Обробка помилки, якщо сервер не відповів
                 debugPrint("Помилка архівування: $e");
               } finally {
-                // Скидаємо стан, щоб пташка не залишалася "затиснутою" назавжди
-                if (mounted) {
-                  setState(() => _isArchiving = false);
-                }
+                if (mounted) setState(() => _isArchiving = false);
               }
             },
             child: Row(
               children: [
-                const Text('Archive all', style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 11, fontFamily: 'Inter')),
+                Text(text, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 11)),
                 const SizedBox(width: 6),
-                // Пташка тепер реагує на стан
-                FigmaArchiveCheckbox(isChecked: _isArchiving),
+                SizedBox(
+                  width: 24, // Ставимо 24, бо твій новий SVG 24x24
+                  height: 24,
+                  child: Center(child: FigmaArchiveCheckbox(isChecked: isChecked)),
+                ),
               ],
             ),
           )
@@ -253,7 +310,7 @@ class _NotificationsOverlayState extends State<NotificationsOverlay> with Notifi
   Widget _buildFigmaEmptyState(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 126,
+      height: 146,
       margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF181826),

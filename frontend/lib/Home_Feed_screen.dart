@@ -34,6 +34,7 @@ class GamerProfile {
   final List<int> times; // ДОДАНО: для матчингу
   final double rating;
   final String password;
+  final int timezoneOffset;
 
   GamerProfile({
     required this.id,
@@ -55,6 +56,7 @@ class GamerProfile {
     required this.times, // ДОДАНО в конструктор
     this.rating = 0,
     required this.password,
+    this.timezoneOffset = 0,
   });
   ///Перероблюємо години у назви частини доби для відображення.
   String get readablePlayTime {
@@ -120,6 +122,7 @@ class GamerProfile {
       times: (json['availability'] as List?)?.map((a) => (a['utc_hour'] as num).toInt()).toList() ?? [],
       rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
       password: '',
+      timezoneOffset: json['timezone_offset'] ?? 0,
     );
   }
 
@@ -626,7 +629,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                     itemCount: filteredGamers.length,
                     itemBuilder: (context, index) {
                       final gamer = filteredGamers[index];
-                      final bool isInviteAllowed = UserSession.canInvite(gamer.id);
+                      final bool isInviteAllowed = UserSession.instance.canInvite(gamer.id);
 
                       return GamerCard(
                         profile: gamer,
@@ -639,7 +642,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                         isInviteAllowed: isInviteAllowed, // Новий параметр
                         onInviteSent: () {
                           setState(() {
-                            UserSession.registerInvite(gamer.id);
+                            UserSession.instance.registerInvite(gamer.id);
                           });
                         },
                       );
@@ -683,11 +686,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                       _fetchNotifications(); // Список оновиться і нотифікація зникне завдяки фільтру is_archived == False
                     }
                   },
-                  onArchiveAll: () async {
-                    // НОВА ЛОГІКА для кнопки Archive all
-                    bool success = await ApiService.archiveAllNotifications();
+                  onArchiveAll: (List<String> ids, String tabName) async {
+                    // Перетворюємо назву таби на тип, який розуміє бекенд (наприклад, 'Match' -> 'match')
+                    // Якщо таба 'All', передаємо null або нічого не передаємо
+                    String? typeParam = tabName == 'All' ? null : tabName.toLowerCase();
+
+                    // Викликаємо нову версію API
+                    bool success = await ApiService.archiveAllNotifications(notificationType: typeParam);
+
                     if (success && mounted) {
-                      _fetchNotifications(); // Список оновиться і все зникне
+                      _fetchNotifications();
                     }
                   },
                   onProfileTap: (int gamerId) async {
@@ -1591,62 +1599,73 @@ class _GamerCardState extends State<GamerCard> {
 
   Future<void> _showInviteDialog(BuildContext context, GamerProfile profile, VoidCallback onInviteSent) async {
     String? selectedGame;
-    bool _isSending = false; // Оголошуємо тут, щоб вона жила поки діалог відкритий
 
+    // Беремо спільні ігри (переконайся, що доступ до widget.profile є)
     final myGames = UserSession().currentUser?.gamesList ?? [];
     final commonGames = widget.profile.gamesList.where((g) => myGames.contains(g)).toList();
 
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Dialog(
-          backgroundColor: const Color(0xFF181826),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Invite to play in:', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-                ...commonGames.map((game) => RadioListTile<String>(
-                  title: Text(game, style: const TextStyle(color: Colors.white)),
-                  value: game,
-                  groupValue: selectedGame,
-                  onChanged: _isSending ? null : (val) => setState(() => selectedGame = val),
-                  activeColor: const Color(0xFF00F5A0),
-                )),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                        onPressed: _isSending ? null : () => Navigator.pop(context),
-                        child: const Text('Cancel')
-                    ),
-                    ElevatedButton(
-                      onPressed: (selectedGame == null || _isSending) ? null : () async {
-                        setState(() => _isSending = true); // Блокуємо відправку
+        builder: (context, setState) {
+          // Локальний стан для діалогу
+          bool isSending = false;
 
-                        bool success = await ApiService.sendInvite(widget.profile.id, selectedGame!);
+          return Dialog(
+            backgroundColor: const Color(0xFF181826),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Invite to play in:', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 15),
+                  ...commonGames.map((game) => RadioListTile<String>(
+                    title: Text(game, style: const TextStyle(color: Colors.white)),
+                    value: game,
+                    groupValue: selectedGame,
+                    onChanged: isSending ? null : (val) => setState(() => selectedGame = val),
+                    activeColor: const Color(0xFF00F5A0),
+                  )),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                          onPressed: isSending ? null : () => Navigator.pop(context),
+                          child: const Text('Cancel')
+                      ),
+                      ElevatedButton(
+                        onPressed: (selectedGame == null || isSending) ? null : () async {
+                          setState(() => isSending = true);
 
-                        if (success) {
-                          widget.onInviteSent();
-                          Navigator.pop(context);
-                        } else {
-                          if (mounted) setState(() => _isSending = false); // Розблоковуємо при помилці
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
-                      child: _isSending
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black))
-                          : const Text('Send', style: TextStyle(color: Colors.black)),
-                    ),
-                  ],
-                )
-              ],
+                          // Відправляємо запит на сервер
+                          bool success = await ApiService.sendInvite(widget.profile.id, selectedGame!);
+
+                          if (success && mounted) {
+                            // Успіх: оновлюємо батька і закриваємо
+                            widget.onInviteSent();
+                            Navigator.pop(context);
+                          } else if (mounted) {
+                            // Помилка: зупиняємо лоадер і показуємо SnackBar
+                            setState(() => isSending = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Wait 10 minutes before next invite")),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0)),
+                        child: isSending
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black))
+                            : const Text('Send', style: TextStyle(color: Colors.black)),
+                      ),
+                    ],
+                  )
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
