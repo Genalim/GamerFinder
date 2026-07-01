@@ -1,17 +1,18 @@
 from datetime import timedelta, datetime
 
+import socketio
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete, update, or_, func, desc, case
+from sqlalchemy import select, and_, delete, update, or_, func, desc, case, text
 from sqlalchemy.orm import selectinload
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import Query
 
-
+from chat_socket import sio
 
 from database import get_db, engine, Base
-from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest
+from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -75,6 +76,14 @@ async def lifespan(app: FastAPI):
 
 # 2. ПОТІМ створення app ОДИН РАЗ
 app = FastAPI(title="GamerFinder API", lifespan=lifespan)
+
+@app.on_event("startup")
+async def startup_event():
+    async with engine.begin() as conn:
+        # Це команда, яка змушує SQLAlchemy перечитати реальну структуру з бази
+        await conn.run_sync(Base.metadata.reflect)
+
+socket_app = socketio.ASGIApp(sio, app)
 
 #Це для аватарок клієнта.
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -1186,9 +1195,44 @@ async def get_notifications_history(
 
     return response
 
+#=====Chats=======#
+@app.post("/chats/get-or-create")
+async def get_or_create_chat(recipient_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    # 1. Знаходимо всі чати поточного юзера
+    my_chats = (await db.execute(select(ChatMember.chat_id).where(ChatMember.user_id == current_user_id))).scalars().all()
+
+    # 2. Шукаємо чат, де є обидва
+    if my_chats:
+        stmt = select(ChatMember.chat_id).where(
+            ChatMember.chat_id.in_(my_chats),
+            ChatMember.user_id == recipient_id
+        )
+        res = await db.execute(stmt)
+        chat_id = res.scalar()
+        if chat_id:
+            return {"chat_id": str(chat_id)}
+
+    # 3. ЯКЩО ЧАТУ НЕМАЄ — СТВОРЮЄМО ЙОГО!
+    new_chat = Chat()
+    db.add(new_chat)
+    await db.flush() # Отримуємо ID нового чату
+
+    db.add(ChatMember(chat_id=new_chat.id, user_id=current_user_id))
+    db.add(ChatMember(chat_id=new_chat.id, user_id=recipient_id))
+    await db.commit()
+
+    return {"chat_id": str(new_chat.id)}
+
+@app.get("/messages/{chat_id}")
+async def get_messages(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    # Тепер це спрацює без проблем, бо типи збігаються
+    stmt = select(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
 
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:socket_app", host="127.0.0.1", port=8000, reload=True)

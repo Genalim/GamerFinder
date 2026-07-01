@@ -224,6 +224,22 @@ class ApiService {
       throw Exception('Не вдалося завантажити профіль');
     }
   }
+  //Це метод для чатів, про всяк випадок трішки відрізняється від верхнього.
+  static Future<GamerProfile> getUserProfileById(String userId) async {
+    print("DEBUG: АПІ Сервіс починає запит до /users/$userId");
+    final response = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/users/$userId'), // Без /profile
+      headers: await ApiService.getHeaders(),
+    );
+
+    print("DEBUG: АПІ Сервіс отримав відповідь, статус: ${response.statusCode}");
+
+    if (response.statusCode == 200) {
+      return GamerProfile.fromJson(json.decode(response.body));
+    } else {
+      throw Exception('Failed to load profile');
+    }
+  }
 
   //Archivation methods
   static Future<bool> _patchRequest(String url) async {

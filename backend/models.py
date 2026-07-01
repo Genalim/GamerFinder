@@ -141,14 +141,14 @@ class ChatMember(Base):
     __tablename__ = 'chat_members'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
-    user_id = Column(UUID(as_uuid=True)) # ID твого юзера
-    role = Column(String, default='member') # 'admin' або 'member'
+    user_id = Column(Integer, ForeignKey('users.id')) # МАЄ БУТИ INTEGER!
+    role = Column(String, default='member')
 
 class Message(Base):
     __tablename__ = 'messages'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
-    sender_id = Column(UUID(as_uuid=True))
+    sender_id = Column(Integer, ForeignKey('users.id')) # ТУТ ТЕЖ МАЄ БУТИ INTEGER!
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_read = Column(Boolean, default=False)

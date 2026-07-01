@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'custom_widgets.dart';
 import 'new_chat_room_screen.dart';
 import 'models.dart';
+import 'api_config.dart';
+import 'api_service.dart';
 
 class NewMessageScreen extends StatefulWidget {
   final VoidCallback onClose;
@@ -19,12 +23,48 @@ class NewMessageScreen extends StatefulWidget {
 
 class _NewMessageScreenState extends State<NewMessageScreen> {
   String? _selectedFriendName;
-  final List<FriendItem> _friends = [
-    FriendItem(name: 'ALEX', status: 'online', initial: 'A', isOnline: true),
-    FriendItem(name: 'NOVA', status: 'was online 1 hour ago', initial: 'N', isOnline: false),
-    FriendItem(name: 'Peter', status: 'was online a year ago', initial: 'P', isOnline: false),
-    FriendItem(name: 'MMA_boxer', status: 'was online yesterday at 10:05 PM', initial: 'M', isOnline: false),
-  ];
+  // Мапа для збереження ID по нікнейму (це наш "міст")
+  final Map<String, int> _friendIdMap = {};
+  List<FriendItem> _friends = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFriends();
+  }
+
+  Future<void> _loadFriends() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+        headers: await ApiService.getHeaders(),
+      );
+      if (response.statusCode == 200 && mounted) {
+        List<dynamic> list = json.decode(response.body);
+
+        setState(() {
+          _friends = list.map((item) {
+            final data = item['user'] ?? item;
+            final nickname = data['nickname'] ?? 'Unknown';
+            final userId = data['id'] ?? 0;
+            final avatar = data['avatar']?.toString(); // Отримуємо URL аватарки
+
+            _friendIdMap[nickname] = userId;
+
+            return FriendItem(
+              name: nickname,
+              status: data['is_online'] == true ? 'online' : 'offline',
+              initial: nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
+              isOnline: data['is_online'] ?? false,
+              avatarUrl: avatar, // Передаємо сюди!
+            );
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка завантаження друзів: $e");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +104,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
 
   Widget _buildFriendTile(FriendItem friend) {
     final bool isSelected = _selectedFriendName == friend.name;
+
     return Container(
       height: 38,
       margin: const EdgeInsets.only(bottom: 8),
@@ -76,6 +117,9 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
         borderRadius: BorderRadius.circular(12),
         onTap: () {
           setState(() { _selectedFriendName = friend.name; });
+
+          final friendId = _friendIdMap[friend.name];
+
           Future.delayed(const Duration(milliseconds: 200), () {
             if (!mounted) return;
             Navigator.pop(context);
@@ -84,7 +128,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
               MaterialPageRoute(
                 builder: (context) => ChatRoomScreen(
                   friendName: friend.name,
-                  // Тут можна передати ID, якщо він є у FriendItem, або null
+                  friendId: friendId?.toString(),
                   onBack: () => Navigator.pop(context),
                 ),
               ),
@@ -95,13 +139,68 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
-              Container(width: 24, height: 24, decoration: const BoxDecoration(color: Color(0xFF0F0F13), shape: BoxShape.circle), child: Center(child: Text(friend.initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 14, color: Color(0xFF00F5A0))))),
+              // Аватарка з логікою перемикання на ініціал
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: ClipOval(
+                  child: buildAvatar(friend.avatarUrl, friend.initial, 24),
+                ),
+              ),
               const SizedBox(width: 8),
-              Text(friend.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+              Text(
+                  friend.name,
+                  style: const TextStyle(color: Colors.white, fontSize: 13)
+              ),
             ],
           ),
         ),
       ),
     );
   }
+
+  Widget buildAvatar(String? avatarUrl, String initial, double size) {
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return _buildLetterAvatar(initial);
+    }
+
+    // Якщо це посилання з сервера (http...)
+    if (avatarUrl.startsWith('http')) {
+      return Image.network(
+        avatarUrl,
+        width: size, height: size, fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
+      );
+    }
+
+    // Якщо це шлях до локального файлу (assets/...)
+    return Image.asset(
+      avatarUrl,
+      width: size, height: size, fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
+    );
+  }
+
+// А це твій метод для ініціалів, який ти вже використовував
+  Widget _buildLetterAvatar(String initial) {
+    return Container(
+      width: 24, // Ставимо фіксований розмір для списку
+      height: 24,
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F0F13), // Темний фон, як у тебе в дизайні
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            fontFamily: 'Love Light',
+            fontSize: 14,
+            color: Color(0xFF00F5A0),
+          ),
+        ),
+      ),
+    );
+  }
+
 }

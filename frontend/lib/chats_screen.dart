@@ -14,6 +14,10 @@ class ChatItem {
   final List<String> userInitials;
   final String status;
 
+  // Додаємо нові поля
+  final double? rating; // null, якщо чат груповий
+  final String? avatarUrl; // Посилання на аватарку
+
   ChatItem({
     required this.title,
     required this.lastMessage,
@@ -23,8 +27,11 @@ class ChatItem {
     this.isGroupChat = false,
     required this.userInitials,
     required this.status,
+    this.rating,
+    this.avatarUrl,
   });
 }
+
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -184,11 +191,16 @@ class _ChatListWidgetState extends State<ChatListWidget> {
               children: [
                 Row(children: [
                   Text(chat.title, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 4),
+
                   if (chat.isPro) ...[
-                    const SizedBox(width: 4),
                     const FigmaRatingStar(isFilled: true, size: 10),
                     const SizedBox(width: 4),
-                    const Text('PRO only', style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 7, fontWeight: FontWeight.bold)),
+                    // Якщо у юзера є рейтинг (наприклад, 4.5), показуємо його, інакше "PRO only"
+                    Text(
+                        chat.rating != null ? chat.rating!.toStringAsFixed(1) : 'PRO only',
+                        style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 7, fontWeight: FontWeight.bold)
+                    ),
                   ],
                 ]),
                 const SizedBox(height: 4),

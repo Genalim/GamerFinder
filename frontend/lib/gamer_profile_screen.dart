@@ -21,7 +21,7 @@ class GamerProfileScreen extends StatefulWidget {
 
   // ВСТАВТЕ ЦЕЙ МЕТОД ВСЕРЕДИНУ КЛАСУ GamerProfileScreen
   static Future<void> openFromId(BuildContext context, String userId) async {
-    // Показуємо спінер (лоадер) для кращого UX
+    // Показуємо спінер
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -29,16 +29,21 @@ class GamerProfileScreen extends StatefulWidget {
     );
 
     try {
-      final profileData = await ApiService.getUserProfile(userId);
+      final profileData = await ApiService.getUserProfileById(userId);
+
       if (context.mounted) {
-        Navigator.pop(context); // Ховаємо спінер
+        // Використовуємо rootNavigator: true, щоб точно закрити діалог
+        Navigator.of(context, rootNavigator: true).pop();
+
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => GamerProfileScreen(profile: profileData)),
         );
       }
     } catch (e) {
-      if (context.mounted) Navigator.pop(context); // Ховаємо спінер у разі помилки
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       print("Помилка відкриття профілю: $e");
     }
   }

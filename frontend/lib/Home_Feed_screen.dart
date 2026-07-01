@@ -85,6 +85,9 @@ class GamerProfile {
   }
 
   factory GamerProfile.fromJson(Map<String, dynamic> json) {
+    print("--- DEBUG JSON START ---");
+    print(json);
+    print("--- DEBUG JSON END ---");
     return GamerProfile(
       id: (json['id'] as num?)?.toInt() ?? 0,
       nickname: (json['nickname'] ?? 'Unknown').toString(),
