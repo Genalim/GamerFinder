@@ -1197,25 +1197,34 @@ async def get_notifications_history(
 
 #=====Chats=======#
 @app.post("/chats/get-or-create")
-async def get_or_create_chat(recipient_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
-    # 1. Знаходимо всі чати поточного юзера
-    my_chats = (await db.execute(select(ChatMember.chat_id).where(ChatMember.user_id == current_user_id))).scalars().all()
+async def get_or_create_chat(
+        recipient_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Шукаємо приватний чат (не груповий), де є саме ці два користувачі
+    # Використовуємо чистий SQL через text(), це найнадійніший спосіб згрупувати учасників діалогу
+    stmt = text("""
+        SELECT cm.chat_id 
+        FROM chat_members cm
+        JOIN chats c ON cm.chat_id = c.id
+        WHERE c.is_group = FALSE AND cm.user_id IN (:u1, :u2)
+        GROUP BY cm.chat_id
+        HAVING COUNT(DISTINCT cm.user_id) = 2
+    """)
 
-    # 2. Шукаємо чат, де є обидва
-    if my_chats:
-        stmt = select(ChatMember.chat_id).where(
-            ChatMember.chat_id.in_(my_chats),
-            ChatMember.user_id == recipient_id
-        )
-        res = await db.execute(stmt)
-        chat_id = res.scalar()
-        if chat_id:
-            return {"chat_id": str(chat_id)}
+    res = await db.execute(stmt, {"u1": current_user_id, "u2": recipient_id})
+    chat_id = res.scalar()
 
-    # 3. ЯКЩО ЧАТУ НЕМАЄ — СТВОРЮЄМО ЙОГО!
-    new_chat = Chat()
+    if chat_id:
+        print(f"DEBUG: Знайдено існуючий чат ID: {chat_id} для юзерів {current_user_id} та {recipient_id}")
+        return {"chat_id": str(chat_id)}
+
+    # ЯКЩО ЧАТУ НЕМАЄ — СТВОРЮЄМО ЙОГО
+    print(f"DEBUG: Чату немає, створюємо новий приватний чат...")
+    new_chat = Chat(is_group=False)
     db.add(new_chat)
-    await db.flush() # Отримуємо ID нового чату
+    await db.flush() # Отримуємо UUID нового чату
 
     db.add(ChatMember(chat_id=new_chat.id, user_id=current_user_id))
     db.add(ChatMember(chat_id=new_chat.id, user_id=recipient_id))
@@ -1229,6 +1238,81 @@ async def get_messages(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     stmt = select(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc())
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@app.patch("/messages/read/{chat_id}")
+async def mark_messages_as_read(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    # Оновлюємо всі повідомлення в чаті, які відправлені НЕ НАМИ і ще не прочитані
+    await db.execute(
+        update(Message)
+        .where(Message.chat_id == chat_id, Message.sender_id != current_user_id, Message.status != "read")
+        .values(status="read")
+    )
+    await db.commit()
+
+    # Відправляємо сокет-подію іншому учаснику, що повідомлення прочитані
+    await sio.emit('messages_read', {'chat_id': str(chat_id)}, room=str(chat_id))
+    return {"status": "ok"}
+
+#Chat screen (chat list)
+async def get_current_user(user_id: int = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+# 2. Виправлений ендпоінт (використовуємо app, а не router)
+@app.get("/chats/list")
+async def get_chats(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+):
+    # Знаходимо всі чати, де бере участь користувач
+    result = await db.execute(
+        select(Chat).join(ChatMember).where(ChatMember.user_id == current_user.id)
+    )
+    chats = result.scalars().all()
+
+    response = []
+    for chat in chats:
+        # Останнє повідомлення
+        msg_res = await db.execute(
+            select(Message).where(Message.chat_id == chat.id).order_by(desc(Message.created_at)).limit(1)
+        )
+        last_msg = msg_res.scalar_one_or_none()
+
+        # Непрочитані
+        unread_res = await db.execute(
+            select(func.count(Message.id)).where(
+                Message.chat_id == chat.id,
+                Message.sender_id != current_user.id,
+                Message.status != 'read'
+            )
+        )
+        unread_count = unread_res.scalar()
+
+        # Партнери для ініціалів
+        members_res = await db.execute(
+            select(User).join(ChatMember).where(ChatMember.chat_id == chat.id, ChatMember.user_id != current_user.id)
+        )
+        others = members_res.scalars().all()
+
+        response.append({
+            "chat_id": str(chat.id),
+            "title": chat.name if chat.is_group else (others[0].nickname if others else "Unknown"),
+            "last_message": last_msg.content if last_msg else "Початок чату",
+            "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
+            "unread_count": unread_count,
+            "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
+            "is_group": chat.is_group,
+            "initials": [u.nickname[0].upper() for u in others] if not chat.is_group else [u.nickname[0].upper() for u in others[:4]],
+            "last_message_status": last_msg.status if last_msg else "sent",
+            "rating": others[0].rating if (not chat.is_group and others) else None,
+            "recipient_id": others[0].id if (not chat.is_group and others) else None, # <--- ДОДАЙ ЦЕ
+            "avatar_url": chat.avatar_url if chat.is_group else (others[0].avatar if others else None), # <--- Гнучкий вибір
+        })
+
+    return response
 
 
 

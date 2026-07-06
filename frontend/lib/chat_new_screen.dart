@@ -26,6 +26,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
   // Мапа для збереження ID по нікнейму (це наш "міст")
   final Map<String, int> _friendIdMap = {};
   List<FriendItem> _friends = [];
+  String _searchQuery = "";
 
   @override
   void initState() {
@@ -68,19 +69,24 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Фільтруємо список перед відображенням
+    final filteredFriends = _friends.where((f) =>
+        f.name.toLowerCase().contains(_searchQuery.toLowerCase())
+    ).toList();
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F13),
       body: SafeArea(
         child: Column(
           children: [
+            // Заголовок
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 5),
               child: Row(
                 children: [
                   FigmaGreenCloseButton(onTap: widget.onClose),
                   const Expanded(
-                      child: Text(
-                          'Write a new message',
+                      child: Text('Write a new message',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontSize: 20, fontWeight: FontWeight.w700)
                       )
@@ -89,11 +95,35 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
                 ],
               ),
             ),
+
+            // --- ПОШУКОВИЙ РЯДОК ---
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(10)),
+                child: TextField(
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: const InputDecoration(
+                    prefixIcon: SizedBox(width: 40, child: Center(child: FigmaSearchIcon())), // Твоя іконка
+                    hintText: 'Search friends...',
+                    hintStyle: TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
+                    border: InputBorder.none,
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ),
+
+            // Список друзів
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                itemCount: _friends.length,
-                itemBuilder: (context, index) => _buildFriendTile(_friends[index]),
+                itemCount: filteredFriends.length,
+                itemBuilder: (context, index) => _buildFriendTile(filteredFriends[index]),
               ),
             ),
           ],

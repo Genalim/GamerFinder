@@ -28,6 +28,7 @@ async def send_message(sid, data):
             chat_id=chat_id,
             sender_id=sender_id,
             content=content,
+            status="sent",
             created_at=datetime.utcnow()
         )
         db.add(new_msg)
@@ -38,7 +39,15 @@ async def send_message(sid, data):
         'chat_id': chat_id,
         'sender_id': sender_id,
         'content': content,
+        'status': "sent",
         'created_at': datetime.utcnow().isoformat()
     }, room=chat_id)
 
     print(f"Повідомлення від {sender_id} в чаті {chat_id}: {content}")
+
+#Typing indication for Chat.
+@sio.on('typing')
+async def typing(sid, data):
+    chat_id = data.get('chat_id')
+    # Відправляємо всім, хто в цій кімнаті, крім того, хто друкує
+    await sio.emit('user_typing', {'chat_id': chat_id}, room=str(chat_id), skip_sid=sid)

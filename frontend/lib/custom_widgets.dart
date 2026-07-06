@@ -988,7 +988,7 @@ class FigmaGroupInfoIcon extends StatelessWidget {
   }
 }
 
-//Refresh Button.
+//==================Refresh Button.===========================
 class RefreshIcon extends StatelessWidget {
   final double size;
   final Color color;
@@ -1011,6 +1011,90 @@ class RefreshIcon extends StatelessWidget {
         fit: BoxFit.contain,
         colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
       ),
+    );
+  }
+}
+
+//================Пташки для чатів===========//
+class FigmaDoubleCheckIcon extends StatelessWidget {
+  final Color color;
+  const FigmaDoubleCheckIcon({super.key, this.color = const Color(0xFF0F0F1A)});
+
+  @override
+  Widget build(BuildContext context) {
+    const String svgString = '''<svg width="15" height="10" viewBox="0 0 15 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M14.0352 0.969727L7.03516 9.00098L4.16016 6.12598M3.87891 9.03223L0.972656 6.12598M10.8477 0.969727L6.87891 5.53223" stroke="#0F0F1A" stroke-width="1.375" stroke-miterlimit="10" stroke-linecap="square"/>
+</svg>''';
+    return SvgPicture.string(svgString, width: 15, height: 10, colorFilter: ColorFilter.mode(color, BlendMode.srcIn));
+  }
+}
+
+/// === ОДИНАРНА ПТАШКА ===
+class FigmaSingleCheckIcon extends StatelessWidget {
+  final Color color;
+  const FigmaSingleCheckIcon({super.key, this.color = const Color(0xFF0F0F1A)});
+
+  @override
+  Widget build(BuildContext context) {
+    const String svgString = '''<svg width="11" height="8" viewBox="0 0 11 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.1673 0.167307L10.3696 0.369592C10.4767 0.476751 10.5369 0.62207 10.5369 0.773592C10.5369 0.925115 10.4767 1.07043 10.3696 1.17759L3.81531 7.73188C3.70815 7.839 3.56283 7.89919 3.41131 7.89919C3.25978 7.89919 3.11447 7.839 3.00731 7.73188L0.167307 4.89188C0.0601803 4.78472 0 4.6394 0 4.48788C0 4.33636 0.0601803 4.19104 0.167307 4.08388L0.369592 3.88159C0.476751 3.77447 0.62207 3.71429 0.773592 3.71429C0.925115 3.71429 1.07043 3.77447 1.17759 3.88159L3.00731 5.71131C3.11447 5.81843 3.25978 5.87861 3.41131 5.87861C3.56283 5.87861 3.70815 5.81843 3.81531 5.71131L9.35931 0.167307C9.46647 0.0601803 9.61178 0 9.7633 0C9.91483 0 10.0601 0.0601803 10.1673 0.167307Z" fill="#0F0F1A"/>
+</svg>''';
+    return SvgPicture.string(svgString, width: 11, height: 8, colorFilter: ColorFilter.mode(color, BlendMode.srcIn));
+  }
+}
+
+
+///Search Icon for chats search box///
+class FigmaSearchIcon extends StatelessWidget {
+  const FigmaSearchIcon({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    const String svgString = '''<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M12 19C12.9193 19 13.8295 18.8189 14.6788 18.4672C15.5281 18.1154 16.2997 17.5998 16.9497 16.9497C17.5998 16.2997 18.1154 15.5281 18.4672 14.6788C18.8189 13.8295 19 12.9193 19 12C19 11.0807 18.8189 10.1705 18.4672 9.32122C18.1154 8.47194 17.5998 7.70026 16.9497 7.05025C16.2997 6.40024 15.5281 5.88463 14.6788 5.53284C13.8295 5.18106 12.9193 5 12 5C10.1435 5 8.36301 5.7375 7.05025 7.05025C5.7375 8.36301 5 10.1435 5 12C5 13.8565 5.7375 15.637 7.05025 16.9497C8.36301 18.2625 10.1435 19 12 19ZM10.087 7.38C10.6935 7.12899 11.3436 6.99986 12 7C12.1326 7 12.2598 6.94732 12.3536 6.85355C12.4473 6.75979 12.5 6.63261 12.5 6.5C12.5 6.36739 12.4473 6.24021 12.3536 6.14645C12.2598 6.05268 12.1326 6 12 6C10.4087 6 8.88258 6.63214 7.75736 7.75736C6.63214 8.88258 6 10.4087 6 12C6 12.1326 6.05268 12.2598 6.14645 12.3536C6.24021 12.4473 6.36739 12.5 6.5 12.5C6.63261 12.5 6.75979 12.4473 6.85355 12.3536C6.94732 12.2598 7 12.1326 7 12C6.99992 11.0109 7.29317 10.0441 7.84266 9.22171C8.39215 8.39934 9.1732 7.75841 10.087 7.38Z" fill="#00F5A0" fill-opacity="0.25"/>
+<path d="M20.5 20.5L17 17" stroke="#00F5A0" stroke-linecap="round"/>
+<path d="M11 19.5C15.6944 19.5 19.5 15.6944 19.5 11C19.5 6.30558 15.6944 2.5 11 2.5C6.30558 2.5 2.5 6.30558 2.5 11C2.5 15.6944 6.30558 19.5 11 19.5Z" stroke="#00F5A0"/>
+</svg>''';
+    return SvgPicture.string(svgString, width: 24, height: 24);
+  }
+}
+
+///Scroll down in chats///
+class FigmaScrollDownIcon extends StatelessWidget {
+  final int unreadCount; // 1. Оголошуємо змінну
+
+  // 2. Оновлюємо конструктор
+  const FigmaScrollDownIcon({super.key, this.unreadCount = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    const String svg = '''<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle cx="18" cy="18" r="16.875" fill="white"/> 
+<path d="M27 18.9563L18 27.5625L9 18.9563H14.9625V8.4375H20.7563V18.9563H27Z" fill="#00F5A0"/>
+</svg>''';
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        SvgPicture.string(svg, width: 36, height: 36),
+        // Лічильник, якщо непрочитаних більше 0
+        if (unreadCount > 0)
+          Positioned(
+            right: -5,
+            top: -5,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle
+              ),
+              child: Text(
+                  "$unreadCount",
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

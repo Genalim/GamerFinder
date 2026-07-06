@@ -152,4 +152,5 @@ class Message(Base):
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_read = Column(Boolean, default=False)
+    status = Column(String, default="sent")
 

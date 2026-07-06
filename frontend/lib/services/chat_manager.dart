@@ -1,13 +1,18 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import '../api_config.dart'; // Імпортуємо твій конфіг
 
 class ChatManager {
   static final ChatManager _instance = ChatManager._internal();
   factory ChatManager() => _instance;
   ChatManager._internal();
 
-  IO.Socket? _socket; // Зробили змінну nullable
+  IO.Socket? _socket;
 
-  // Геттер, який перевіряє ініціалізацію
+  // Стан підключення
+  bool isConnected = false;
+  // Колбек для оновлення UI
+  Function(bool)? onStatusChanged;
+
   IO.Socket get socket {
     if (_socket == null) {
       throw Exception("ChatManager не ініціалізовано! Спочатку викличте init()");
@@ -16,26 +21,37 @@ class ChatManager {
   }
 
   void init(String userId) {
-    if (_socket != null) return; // Якщо вже є, не ініціалізуємо ще раз
+    if (_socket != null) return;
 
-    _socket = IO.io('http://10.0.2.2:8000', <String, dynamic>{
+    // Використовуємо ApiConfig.baseUrl
+    _socket = IO.io(ApiConfig.baseUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
       'query': {'user_id': userId},
-      'connectTimeout': 10000, // 10 секунд
-      'reconnection': true,   // Дозволь автоматичне перепідключення
+      'connectTimeout': 10000,
+      'reconnection': true,
       'reconnectionAttempts': 5,
     });
 
-    _socket!.connect();
+    // Підключення
+    _socket!.onConnect((_) {
+      print('DEBUG: Сокет підключено!');
+      isConnected = true;
+      if (onStatusChanged != null) onStatusChanged!(true);
+    });
 
-    _socket!.onConnect((_) => print('DEBUG: Сокет підключено!'));
+    // Відключення
+    _socket!.onDisconnect((reason) {
+      print('DEBUG: Сокет відключено: $reason');
+      isConnected = false;
+      if (onStatusChanged != null) onStatusChanged!(false);
+    });
+
+    // Помилки
     _socket!.onConnectError((err) => print('DEBUG: Помилка підключення: $err'));
     _socket!.onError((err) => print('DEBUG: Помилка сокета: $err'));
 
-    _socket!.onAny((event, data) {
-      print('DEBUG: ПРИЛЕТІЛА ПОДІЯ: $event, ДАНІ: $data');
-    });
+    _socket!.connect();
   }
 
   void joinChat(String chatId) {
