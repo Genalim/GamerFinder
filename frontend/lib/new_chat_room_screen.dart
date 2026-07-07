@@ -33,7 +33,7 @@ class ChatRoomScreen extends StatefulWidget {
   State<ChatRoomScreen> createState() => _ChatRoomScreenState();
 }
 
-class _ChatRoomScreenState extends State<ChatRoomScreen> {
+class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObserver {
   final List<String> _backgrounds = ['1.webp', '2.webp', '3.webp'];
   late String _currentBg;
   final TextEditingController _textController = TextEditingController();
@@ -43,6 +43,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final Map<int, GlobalKey> _messageKeys = {};
   int _firstUnreadIndex = -1;
   final FocusNode _focusNode = FocusNode();
+  double _currentBottomPadding = 20.0;
 
   // Додаємо змінну для реального ID чату
   String? _activeChatId;
@@ -69,6 +70,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     print("DEBUG: ChatRoomScreen відкрився. chatId: ${widget.chatId}, friendId: ${widget.friendId}");
     _currentBg = _backgrounds[Random().nextInt(_backgrounds.length)];
 
@@ -232,7 +234,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // Даємо маленький час системі на зміну розміру вікна
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
   }
 
   void _showActionsOverlay(BuildContext context, Map<String, dynamic> message, Offset tapPosition) async {
@@ -325,18 +339,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Widget build(BuildContext context) {
     final String initial = widget.friendName.isNotEmpty ? widget.friendName[0].toUpperCase() : '?';
 
-    // Беремо висоту екрана і віднімаємо клавіатуру прямо тут
+    // Використовуємо MediaQuery прямо тут, Scaffold автоматично реагує на це через padding
     final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
-    final double screenHeight = MediaQuery.of(context).size.height;
-    final double usableHeight = screenHeight - keyboardHeight;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F13),
-      resizeToAvoidBottomInset: false, // МИ САМІ КЕРУЄМО ВИСОТОЮ
-      body: SizedBox(
-        height: usableHeight, // Фіксуємо висоту контейнера
+      resizeToAvoidBottomInset: true, // Вмикаємо нативний механізм
+      body: Container(
+        padding: EdgeInsets.only(bottom: keyboardHeight > 0 ? 0 : 0), // Scaffold сам підніме Padding
         child: Stack(
           children: [
+            // Фон
             Positioned.fill(
               child: Image.asset(
                 'assets/ChatBackground/$_currentBg',
@@ -344,33 +357,61 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 opacity: const AlwaysStoppedAnimation(0.3),
               ),
             ),
+
+            // Основний контент
             Column(
               children: [
                 _buildHeader(initial),
                 Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.only(bottom: 20),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = _messages[index];
-                      return ChatMessageWidget(
-                        key: _messageKeys[index] ?? ValueKey(index),
-                        showDateDivider: index == 0 || !isSameDay(msg['time'], _messages[index - 1]['time']),
-                        message: ChatMessage(
-                          id: index.toString(),
-                          content: msg['content'],
-                          senderId: msg['sender_id'],
-                          senderName: "User",
-                          timestamp: msg['time'],
-                          isMe: msg['isMe'] ?? false,
-                          status: MessageStatus.values.firstWhere((e) => e.name == (msg['status'] ?? 'sent'), orElse: () => MessageStatus.sent),
+                  child: Stack(
+                    children: [
+                      ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.only(bottom: 20),
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = _messages[index];
+                          final bool isNewDay = index == 0 || !isSameDay(msg['time'], _messages[index - 1]['time']);
+                          final status = MessageStatus.values.firstWhere(
+                                (e) => e.name == (msg['status'] ?? 'sent'),
+                            orElse: () => MessageStatus.sent,
+                          );
+
+                          return ChatMessageWidget(
+                            key: _messageKeys[index] ?? ValueKey(index),
+                            showDateDivider: isNewDay,
+                            message: ChatMessage(
+                              id: index.toString(),
+                              content: msg['content']?.toString() ?? "",
+                              senderId: msg['sender_id']?.toString() ?? "0",
+                              senderName: "User",
+                              timestamp: msg['time'] is DateTime ? msg['time'] : DateTime.now(),
+                              isMe: msg['isMe'] ?? false,
+                              status: status,
+                            ),
+                            onActionSelected: (a) {},
+                          );
+                        },
+                      ),
+                      if (_showScrollDownButton)
+                        Positioned(
+                          right: 20,
+                          bottom: 20,
+                          child: GestureDetector(
+                            onTap: () {
+                              _scrollController.animateTo(
+                                _scrollController.position.maxScrollExtent,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeOut,
+                              );
+                            },
+                            child: const FigmaScrollDownIcon(),
+                          ),
                         ),
-                        onActionSelected: (a) {},
-                      );
-                    },
+                    ],
                   ),
                 ),
+                // Поле вводу
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                   child: _buildInput(),
