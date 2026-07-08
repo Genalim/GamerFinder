@@ -153,4 +153,15 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_read = Column(Boolean, default=False)
     status = Column(String, default="sent")
+    reply_to_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"), nullable=True)
+    reactions = relationship("MessageReaction", back_populates="message", cascade="all, delete-orphan")
+
+class MessageReaction(Base):
+    __tablename__ = 'message_reactions'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4) # Виправ UUID на UUID(as_uuid=True)
+    message_id = Column(UUID(as_uuid=True), ForeignKey('messages.id'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    reaction_type = Column(String, default='like')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    message = relationship("Message", back_populates="reactions")
 

@@ -1195,6 +1195,8 @@ async def get_notifications_history(
 
     return response
 
+
+
 #=====Chats=======#
 @app.post("/chats/get-or-create")
 async def get_or_create_chat(
@@ -1234,10 +1236,13 @@ async def get_or_create_chat(
 
 @app.get("/messages/{chat_id}")
 async def get_messages(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    # Тепер це спрацює без проблем, бо типи збігаються
+    # Тепер вибираємо повідомлення і додаємо reply_to_id у відповідь
     stmt = select(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc())
     result = await db.execute(stmt)
-    return result.scalars().all()
+    messages = result.scalars().all()
+
+    # Повертаємо список, фронтенд отримає reply_to_id автоматично через Pydantic (якщо він є в схемі)
+    return messages
 
 
 @app.patch("/messages/read/{chat_id}")
@@ -1313,6 +1318,39 @@ async def get_chats(
         })
 
     return response
+
+#Options for Message#
+@app.patch("/messages/{message_id}")
+async def edit_message(
+        message_id: str,
+        data: dict, # Очікуємо {"content": "новий текст"}
+        db: AsyncSession = Depends(get_db), # Змінено на AsyncSession
+        current_user: User = Depends(get_current_user)
+):
+    # 1. Знаходимо повідомлення в БД асинхронно
+    result = await db.execute(select(Message).filter(Message.id == message_id))
+    message = result.scalars().first()
+
+    # 2. Перевіряємо, чи воно існує і чи належить користувачу
+    if not message or message.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Не можна редагувати чуже повідомлення")
+
+    # 3. Оновлюємо контент
+    message.content = data['content']
+    message.updated_at = datetime.utcnow()
+
+    # 4. Асинхронний commit
+    await db.commit()
+
+    # 5. Оповіщаємо іншого користувача через Socket.io
+    await sio.emit('message_edited', {
+        'message_id': message_id,
+        'new_content': message.content,
+        'chat_id': str(message.chat_id) # переконайся, що chat_id конвертується в string
+    }, room=str(message.chat_id))
+
+    return {"status": "success"}
+
 
 
 

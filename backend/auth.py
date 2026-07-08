@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+
 # Секретний ключ (його нікому не кажи!)
 SECRET_KEY = "my_super_secret_key_123"
 ALGORITHM = "HS256"
@@ -43,3 +44,4 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
         import traceback
         traceback.print_exc() # <--- ЦЕ ВИВЕДЕ ПРИЧИНУ 403
         raise HTTPException(status_code=403, detail="Помилка авторизації")
+

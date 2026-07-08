@@ -44,6 +44,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   int _firstUnreadIndex = -1;
   final FocusNode _focusNode = FocusNode();
   double _currentBottomPadding = 20.0;
+  Map<String, dynamic>? _messageToEdit;
+  Map<String, dynamic>? _messageToReply;
 
   // Додаємо змінну для реального ID чату
   String? _activeChatId;
@@ -110,11 +112,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       }
     });
 
+    ChatManager().socket.off('message_edited');
+    ChatManager().socket.on('message_edited', (data) {
+      if (!mounted) return;
+
+      final String messageId = data['message_id'].toString();
+      final String newContent = data['new_content'];
+
+      setState(() {
+        // Шукаємо повідомлення в списку і оновлюємо його
+        final index = _messages.indexWhere((m) => m['id'] == messageId);
+        if (index != -1) {
+          _messages[index]['content'] = newContent;
+        }
+      });
+    });
+
     _scrollController.addListener(() {
       if (!mounted) return;
-      // Показуємо кнопку, якщо ми не в самому низу
-      final bool isNearBottom = _scrollController.offset >= (_scrollController.position.maxScrollExtent - 200);
-      if (_showScrollDownButton == isNearBottom) {
+
+      // Визначаємо, чи ми біля самого низу (похибка 50 пікселів)
+      final bool isNearBottom = _scrollController.offset >= (_scrollController.position.maxScrollExtent - 50);
+
+      // Якщо ми біля низу, позначаємо все як прочитане
+      if (isNearBottom && _activeChatId != null) {
+        // Перевіряємо, чи є взагалі що читати
+        bool hasUnread = _messages.any((m) => m['sender_id'] != UserSession().currentUser?.id.toString() && m['status'] != 'read');
+        if (hasUnread) {
+          _markAsReadOnServer(_activeChatId!);
+        }
+      }
+
+      if (_showScrollDownButton != !isNearBottom) {
         setState(() => _showScrollDownButton = !isNearBottom);
       }
     });
@@ -141,18 +170,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       if (response.statusCode == 200) {
         final List<dynamic> list = json.decode(response.body);
         final String myId = UserSession().currentUser?.id.toString() ?? "";
+        final String myNickname = UserSession().currentUser?.nickname ?? "You";
 
         setState(() {
           _messages = list.map((item) => {
+            'id': item['id'].toString(),
             'content': item['content'],
             'sender_id': item['sender_id'].toString(),
+            // ТУТ ПРАВИЛЬНА ЛОГІКА ДЛЯ ІСТОРІЇ:
+            'sender_nickname': item['sender_nickname'] ??
+                (item['sender_id'].toString() == myId ? myNickname : widget.friendName),
             'isMe': item['sender_id'].toString() == myId,
             'time': _parseDateTime(item['created_at']),
-            'status': item['status'] ?? 'sent', // <--- ВАЖЛИВО: беремо статус
+            'status': item['status'] ?? 'sent',
+            'reply_to_id': item['reply_to_id'],
           }).toList();
-          for (int i = 0; i < _messages.length; i++) {
-            _messageKeys[i] = GlobalKey();
-          }
+
           _messages.sort((a, b) => a['time'].compareTo(b['time']));
         });
         _handleInitialScroll();
@@ -164,12 +197,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   String? _friendAvatarUrl;
 
-  Future<void> _markAsRead(String chatId) async {
+  Future<void> _markAsReadOnServer(String chatId) async {
     try {
-      await http.patch(
+      // ВАЖЛИВО: переконайся, що endpoint /messages/read/$chatId на бекенді
+      // реально оновлює статус усіх повідомлень у цьому чаті на 'read'
+      final response = await http.patch(
         Uri.parse('${ApiConfig.baseUrl}/messages/read/$chatId'),
         headers: await ApiService.getHeaders(),
       );
+      if (response.statusCode == 200) {
+        // Якщо сервер відповів ОК, оновлюємо UI
+        _markMessagesAsReadUi(chatId);
+      }
     } catch (e) {
       debugPrint("Помилка при спробі позначити як прочитане: $e");
     }
@@ -301,10 +340,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
     setState(() {
       _messages.add({
+        'id': messageData['id'].toString(),
         'content': content,
         'sender_id': senderId,
+        'sender_nickname': messageData.containsKey('sender_nickname')
+            ? messageData['sender_nickname']
+            : (senderId == UserSession().currentUser?.id.toString()
+            ? UserSession().currentUser?.nickname ?? "You"
+            : widget.friendName),
         'isMe': senderId == UserSession().currentUser?.id.toString(),
         'time': time,
+        'reply_to_id': messageData.containsKey('reply_to_id') ? messageData['reply_to_id'] : null,
       });
       _messages.sort((a, b) => a['time'].compareTo(b['time']));
     });
@@ -332,6 +378,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       }
     } else {
       _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    }
+  }
+
+  void _handleMessageAction(String action, Map<String, dynamic> message) {
+    if (action == 'Edit') {
+      setState(() {
+        _messageToEdit = message;
+        _textController.text = message['content'];
+        _isInputEmpty = false;
+      });
+      _focusNode.requestFocus(); // Фокусуємо клавіатуру
+    } else if (action == 'Reply') {
+      setState(() {
+        _messageToReply = message; // Зберігаємо повідомлення для відповіді
+        _messageToEdit = null;
+        _textController.clear(); // Очищаємо інпут для нової відповіді
+      });
+      _focusNode.requestFocus();
+    } else if (action == 'Delete') {
+      // Тут логіка видалення через API
+    } else if (action == 'Copy') {
+      // Копіювання в буфер обміну
     }
   }
 
@@ -384,12 +452,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                               id: index.toString(),
                               content: msg['content']?.toString() ?? "",
                               senderId: msg['sender_id']?.toString() ?? "0",
-                              senderName: "User",
+                              senderName: msg['sender_nickname'] ?? "User",
                               timestamp: msg['time'] is DateTime ? msg['time'] : DateTime.now(),
                               isMe: msg['isMe'] ?? false,
                               status: status,
+                              replyToId: msg['reply_to_id']?.toString(),
                             ),
-                            onActionSelected: (a) {},
+                            allMessages: _messages,
+                            onActionSelected: (action) => _handleMessageAction(action, msg),
                           );
                         },
                       ),
@@ -399,6 +469,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                           bottom: 20,
                           child: GestureDetector(
                             onTap: () {
+                              if (_activeChatId != null) {
+                                _markAsReadOnServer(_activeChatId!); // Ось тут виклик API
+                              }
                               _scrollController.animateTo(
                                 _scrollController.position.maxScrollExtent,
                                 duration: const Duration(milliseconds: 300),
@@ -524,27 +597,75 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   Widget _buildInput() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-          color: const Color(0xFF181826),
-          border: Border.all(color: const Color(0xFF2B2B3B)),
-          borderRadius: BorderRadius.circular(12)
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          const Padding(padding: EdgeInsets.only(bottom: 8), child: FigmaAttachIcon()),
-          const SizedBox(width: 8),
-          Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 100),
-                child: TextField(
+    return Column(
+      mainAxisSize: MainAxisSize.min, // Щоб займало мінімум місця
+      children: [
+        // 1. Прев'ю-блок для Reply (з'являється тільки якщо _messageToReply != null)
+        if (_messageToReply != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF181826),
+              border: Border.all(color: const Color(0xFF2B2B3B)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(width: 2, height: 30, color: const Color(0xFF00F5A0)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Replying to ${widget.friendName}",
+                          style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text(_messageToReply!['content'],
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 10)),
+                    ],
+                  ),
+                ),
+                // Хрестик у реплаї: робимо неоново-зеленим, але залишаємо стандартний розмір
+                ColorFiltered(
+                  colorFilter: const ColorFilter.mode(Color(0xFF00F5A0), BlendMode.srcIn),
+                  child: FigmaCloseButton(
+                    onTap: () {
+                      setState(() {
+                        _messageToEdit = null;
+                        _messageToReply = null;
+                        _textController.clear();
+                      });
+                      _focusNode.unfocus();
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // 2. Основний інпут
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+              color: const Color(0xFF181826),
+              border: Border.all(color: const Color(0xFF2B2B3B)),
+              borderRadius: BorderRadius.circular(12)
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Padding(padding: EdgeInsets.only(bottom: 8), child: FigmaAttachIcon()),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 100),
+                  child: TextField(
                     controller: _textController,
+                    focusNode: _focusNode,
                     style: const TextStyle(color: Colors.white),
                     maxLines: null,
                     onTap: () {
-                      // Скрол до низу з маленькою затримкою, щоб клавіатура вже почала підніматися
                       Future.delayed(const Duration(milliseconds: 200), () {
                         if (_scrollController.hasClients) {
                           _scrollController.animateTo(
@@ -556,46 +677,148 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                       });
                     },
                     decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        hintText: "Write...",
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 8)
-                    )
+                      border: InputBorder.none,
+                      hintText: "Write...",
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
                 ),
-              )
-          ),
-          const SizedBox(width: 8),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _isInputEmpty
-                ? const FigmaSendInactiveIcon()
-                : GestureDetector(
-              onTap: () {
-                final String myId = UserSession().currentUser?.id.toString() ?? "";
-                final String content = _textController.text.trim();
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    // Кнопка скасування редагування: неоново-зелена і збільшена
+                    if (_messageToEdit != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Transform.scale(
+                          scale: 1.2,
+                          child: ColorFiltered(
+                            colorFilter: const ColorFilter.mode(Color(0xFF00F5A0), BlendMode.srcIn),
+                            child: FigmaCloseButton(
+                              onTap: () {
+                                setState(() {
+                                  _messageToEdit = null;
+                                  _textController.clear();
+                                });
+                                _focusNode.unfocus();
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
 
-                if (_activeChatId != null && content.isNotEmpty) {
-                  _addNewMessageToUi({
-                    'content': content,
-                    'sender_id': myId,
-                    'created_at': DateTime.now().toUtc().toIso8601String(),
-                  });
+                    // Кнопка відправки
+                    _isInputEmpty
+                        ? const FigmaSendInactiveIcon()
+                        : GestureDetector(
+                      onTap: () async {
+                        final String myId = UserSession().currentUser?.id.toString() ?? "";
+                        final String content = _textController.text.trim();
 
-                  ChatManager().sendMessage(_activeChatId!, myId, content);
-                  _textController.clear();
-                }
-              },
-              child: const FigmaSendActiveIcon(),
-            ),
+                        if (_activeChatId != null && content.isNotEmpty) {
+                          if (_messageToEdit != null) {
+                            // РЕЖИМ РЕДАГУВАННЯ
+                            await _editMessageOnServer(_messageToEdit!['id'].toString(), content);
+                            setState(() => _messageToEdit = null);
+                          } else {
+                            // РЕЖИМ ВІДПРАВКИ
+                            final replyId = _messageToReply != null ? _messageToReply!['id'] : null;
+                            _addNewMessageToUi({
+                              'content': content,
+                              'sender_id': myId,
+                              'created_at': DateTime.now().toUtc().toIso8601String(),
+                              'reply_to_id': replyId,
+                            });
+                            ChatManager().sendMessage(_activeChatId!, myId, content, replyTo: replyId);
+                            setState(() => _messageToReply = null);
+                          }
+                          _textController.clear();
+                        }
+                      },
+                      child: const FigmaSendActiveIcon(),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
   bool isSameDay(DateTime d1, DateTime d2) {
     return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
   }
+
+  Future<void> _editMessageOnServer(String messageId, String newContent) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/messages/$messageId'),
+        headers: await ApiService.getHeaders(),
+        body: json.encode({'content': newContent}),
+      );
+
+      if (response.statusCode == 200) {
+        // Оновлюємо локальний список
+        setState(() {
+          final index = _messages.indexWhere((m) => m['id'] == messageId);
+          if (index != -1) {
+            _messages[index]['content'] = newContent;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка редагування: $e");
+    }
+  }
+
+  Widget _buildReplyPreview() {
+    if (_messageToReply == null) return const SizedBox.shrink();
+
+    final String myId = UserSession().currentUser?.id.toString() ?? "";
+    final String myNickname = UserSession().currentUser?.nickname ?? "You";
+
+    // Якщо автор цитованого повідомлення — це ми, пишемо свій нік, інакше нік друга
+    final String replyAuthor = (_messageToReply!['sender_id'].toString() == myId)
+        ? myNickname
+        : widget.friendName;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF181826),
+        border: Border.all(color: const Color(0xFF2B2B3B)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(width: 2, height: 30, color: const Color(0xFF00F5A0)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(replyAuthor, style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 12, fontWeight: FontWeight.bold)),
+                Text(_messageToReply!['content'], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 10)),
+              ],
+            ),
+          ),
+          FigmaCloseButton(
+            onTap: () => setState(() => _messageToReply = null),
+          ),
+        ],
+      ),
+    );
+  }
+
 }
+
+
 
 enum MessageStatus { sent, delivered, read }
 class ChatMessage {
@@ -607,6 +830,7 @@ class ChatMessage {
   final DateTime timestamp;
   final bool isMe;
   final MessageStatus status;
+  final String? replyToId;
 
   ChatMessage({
     required this.id,
@@ -617,6 +841,7 @@ class ChatMessage {
     required this.timestamp,
     required this.isMe,
     this.status = MessageStatus.sent,
+    this.replyToId,
   });
 }
 
@@ -624,11 +849,13 @@ class ChatMessageWidget extends StatefulWidget {
   final ChatMessage message;
   final Function(String) onActionSelected;
   final bool showDateDivider;
+  final List<Map<String, dynamic>> allMessages;
 
   const ChatMessageWidget({
     super.key,
     required this.message,
     required this.onActionSelected,
+    required this.allMessages,
     this.showDateDivider = false,
   });
 
@@ -650,7 +877,12 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Text(
               DateFormat('d MMMM yyyy').format(widget.message.timestamp.toLocal()),
-              style: const TextStyle(color: Color(0xFF6E6E80), fontSize: 10),
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+                color: Colors.white,
+              ),
             ),
           ),
         Align(
@@ -659,14 +891,14 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             widthFactor: 1.0,
             child: Align(
               alignment: widget.message.isMe ? Alignment.centerRight : Alignment.centerLeft,
-              // ЗАЛИШАЄМО ЛИШЕ ЦЕЙ КОНТЕЙНЕР З MARGIN ТА KEY
               child: Container(
                 key: _messageKey,
                 margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
                 child: CompositedTransformTarget(
                   link: _layerLink,
                   child: GestureDetector(
-                    onLongPress: () => _showBlurActions(context),
+                    // ВИПРАВЛЕНО ВИКЛИК: додано параметр widget.message.isMe
+                    onLongPress: () => _showBlurActions(context, widget.message.isMe),
                     child: _buildMessageContainer(),
                   ),
                 ),
@@ -696,6 +928,39 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     String formattedTime = DateFormat('HH:mm').format(widget.message.timestamp.toLocal());
     final double maxWidth = MediaQuery.of(context).size.width * 0.75;
 
+    // Логіка для пошуку повідомлення, на яке ми відповідаємо
+    // Оскільки _messages в батьківському класі, ми шукаємо в ньому
+    final replyMsg = (widget.message.replyToId != null)
+        ? widget.allMessages.firstWhere((m) => m['id'] == widget.message.replyToId, orElse: () => {})
+        : {};
+
+    Widget replyBlock = const SizedBox.shrink();
+    if (replyMsg.isNotEmpty) {
+      final String myId = UserSession().currentUser?.id.toString() ?? "";
+      final String myNickname = UserSession().currentUser?.nickname ?? "You";
+
+      // Логіка визначення імені автора цитати
+      final String authorName = (replyMsg['sender_id'].toString() == myId)
+          ? myNickname
+          : (replyMsg['sender_nickname'] ?? "Friend");
+
+      replyBlock = Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: widget.message.isMe ? Colors.black.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+          border: Border(left: BorderSide(color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), width: 2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(authorName, style: TextStyle(color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), fontSize: 10, fontWeight: FontWeight.bold)),
+            Text(replyMsg['content'], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: widget.message.isMe ? const Color(0xFF0F0F1A).withOpacity(0.7) : Colors.white70, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+
     Widget timeAndStatus = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -707,7 +972,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         ),
         if (widget.message.isMe) ...[
           const SizedBox(width: 4),
-          _buildStatusIcon(widget.message.status), // <--- ВИКОРИСТОВУЄМО НАШУ ЛОГІКУ
+          _buildStatusIcon(widget.message.status),
         ],
       ],
     );
@@ -719,18 +984,23 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         borderRadius: BorderRadius.circular(12),
       ),
       constraints: BoxConstraints(maxWidth: maxWidth),
-      // Використовуємо Wrap, який є безпечним і стабільним у списках
       child: Wrap(
         alignment: WrapAlignment.end,
         crossAxisAlignment: WrapCrossAlignment.end,
         spacing: 4,
         children: [
-          Text(
-            widget.message.content,
-            style: TextStyle(
-              color: widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white,
-              fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter',
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              replyBlock, // Доданий блок відповіді
+              Text(
+                widget.message.content,
+                style: TextStyle(
+                  color: widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white,
+                  fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter',
+                ),
+              ),
+            ],
           ),
           timeAndStatus,
         ],
@@ -758,15 +1028,27 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     );
   }
 
-  void _showBlurActions(BuildContext context) {
+  void _showBlurActions(BuildContext context, bool isMe) {
     final RenderBox? renderBox = _messageKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
     final position = renderBox.localToGlobal(Offset.zero);
     final size = renderBox.size;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    const double menuHeight = 220.0;
-    // Рахуємо, чи влізе меню знизу, з урахуванням відступу від краю
+    // Формуємо список елементів меню
+    List<Map<String, dynamic>> menuItems = [
+      {"title": "Reply", "icon": const FigmaReplyIcon(), "color": const Color(0xFF00F5A0)},
+      {"title": "Copy", "icon": const FigmaCopyIcon(), "color": const Color(0xFF00F5A0)},
+      {"title": "Forward", "icon": const FigmaForwardIcon(), "color": const Color(0xFF00F5A0), "isForward": true},
+    ];
+
+    if (isMe) {
+      menuItems.insert(1, {"title": "Edit", "icon": const FigmaEditIcon(), "color": const Color(0xFF00F5A0)});
+      menuItems.add({"title": "Delete", "icon": const FigmaDeleteIcon(), "color": const Color(0xFFFF6B6B)});
+    }
+
+    // Висота меню залежить від кількості елементів (приблизно 35px на елемент)
+    final double menuHeight = menuItems.length * 35.0 + 20;
     final bool showAbove = (position.dy + size.height + menuHeight) > (screenHeight - 50);
 
     showGeneralDialog(
@@ -775,7 +1057,6 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
       barrierLabel: "Menu",
       pageBuilder: (ctx, _, __) => Stack(
         children: [
-          // 1. Блюр
           GestureDetector(
             onTap: () => Navigator.pop(ctx),
             child: BackdropFilter(
@@ -783,51 +1064,43 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
               child: Container(color: Colors.black.withOpacity(0.3)),
             ),
           ),
-
-          // 2. Чітке повідомлення
           Positioned(
             top: position.dy + 4,
-            // Якщо моє -> прив'язуємо правий край до 16, лівий автоматичний (null)
-            // Якщо чуже -> прив'язуємо лівий край до 16, правий автоматичний (null)
             right: widget.message.isMe ? 16 : null,
             left: !widget.message.isMe ? 16 : null,
-            child: IgnorePointer(
-              child: Material(
-                color: Colors.transparent,
-                child: SizedBox(
-                  // Вказуємо ширину оригінального віджета, щоб воно не деформувалось
-                  width: size.width,
-                  child: Align(
-                    // Align змушує вміст притискатися до потрібної сторони всередині виділеного місця
-                    alignment: widget.message.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                    child: _buildMessageContainer(),
-                  ),
+            child: Material(
+              color: Colors.transparent,
+              child: SizedBox(
+                width: size.width,
+                child: Align(
+                  alignment: widget.message.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: _buildMessageContainer(),
                 ),
               ),
             ),
           ),
-
-          // 3. Меню
           Positioned(
-            top: showAbove ? position.dy - menuHeight -3 : position.dy + size.height + 1,
+            top: showAbove ? position.dy - menuHeight - 3 : position.dy + size.height + 1,
             right: widget.message.isMe ? 16 : null,
             left: !widget.message.isMe ? 16 : null,
             child: Material(
               color: Colors.transparent,
               child: Container(
-                width: 150,
+                width: 112,
+                height: menuHeight,
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF181826),
-                  borderRadius: BorderRadius.circular(12),
+                  color: const Color(0xFF2B2B3B),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: ['Reply', 'Edit', 'Copy', 'Delete'].map((a) => ListTile(
-                    title: Text(a, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                    onTap: () {
-                      widget.onActionSelected(a);
-                      Navigator.pop(ctx);
-                    },
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: menuItems.map((item) => _buildMenuItem(
+                      item["title"],
+                      item["icon"],
+                      item["color"],
+                      ctx,
+                      isForward: item["isForward"] ?? false
                   )).toList(),
                 ),
               ),
@@ -837,5 +1110,35 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
       ),
     );
   }
+
+  Widget _buildMenuItem(String title, Widget iconWidget, Color color, BuildContext ctx, {bool isForward = false}) {
+    return GestureDetector(
+      onTap: () {
+        widget.onActionSelected(title);
+        Navigator.pop(ctx);
+      },
+      child: Row(
+        children: [
+          Transform(
+            alignment: Alignment.center,
+            transform: isForward ? Matrix4.rotationY(pi) : Matrix4.identity(),
+            child: iconWidget,
+          ),
+          const SizedBox(width: 15),
+          Text(
+            title,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontWeight: FontWeight.w500,
+              fontSize: 14,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
 }
 

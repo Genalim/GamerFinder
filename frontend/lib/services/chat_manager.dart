@@ -58,11 +58,12 @@ class ChatManager {
     socket.emit('join_chat', {'chat_id': chatId});
   }
 
-  void sendMessage(String chatId, String senderId, String content) {
+  void sendMessage(String chatId, String senderId, String content, {String? replyTo}) {
     socket.emit('send_message', {
       'chat_id': chatId,
       'sender_id': senderId,
       'content': content,
+      'reply_to_id': replyTo,
     });
   }
 }
