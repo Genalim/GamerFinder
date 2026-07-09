@@ -160,15 +160,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       if (_isInputEmpty != isEmpty) setState(() => _isInputEmpty = isEmpty);
     });
 
+    ChatManager().socket.on('reaction_updated', (data) {
+      if (!mounted) return;
+      setState(() {
+        final index = _messages.indexWhere((m) => m['id'] == data['message_id']);
+        if (index != -1) {
+          _messages[index]['likes_count'] = data['count'];
+          _messages[index]['is_liked_by_me'] = data['is_liked_by_me'];
+        }
+      });
+    });
+
     _messages.sort((a, b) => a['time'].compareTo(b['time']));
   }
 
   // Окремий метод для завантаження історії
   Future<void> _loadHistory(String chatId) async {
     try {
-      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/messages/$chatId'));
+      // ВАЖЛИВО: додаємо headers, як ти робиш у методі _markAsReadOnServer
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/messages/$chatId'),
+        headers: await ApiService.getHeaders(), // <-- ДОДАЙ ЦЕ
+      );
+
       if (response.statusCode == 200) {
         final List<dynamic> list = json.decode(response.body);
+        // ... далі твій код обробки повідомлень ...
         final String myId = UserSession().currentUser?.id.toString() ?? "";
         final String myNickname = UserSession().currentUser?.nickname ?? "You";
 
@@ -177,18 +194,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
             'id': item['id'].toString(),
             'content': item['content'],
             'sender_id': item['sender_id'].toString(),
-            // ТУТ ПРАВИЛЬНА ЛОГІКА ДЛЯ ІСТОРІЇ:
             'sender_nickname': item['sender_nickname'] ??
-                (item['sender_id'].toString() == myId ? myNickname : widget.friendName),
+            (item['sender_id'].toString() == myId ? myNickname : widget.friendName),
             'isMe': item['sender_id'].toString() == myId,
             'time': _parseDateTime(item['created_at']),
             'status': item['status'] ?? 'sent',
             'reply_to_id': item['reply_to_id'],
+            'likes_count': item['likes_count'] ?? 0,
+            'is_liked_by_me': item['is_liked_by_me'] ?? false,
           }).toList();
 
           _messages.sort((a, b) => a['time'].compareTo(b['time']));
         });
         _handleInitialScroll();
+      } else {
+        debugPrint("Помилка завантаження: ${response.statusCode} - ${response.body}");
       }
     } catch (e) {
       debugPrint("Помилка завантаження історії: $e");
@@ -400,6 +420,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       // Тут логіка видалення через API
     } else if (action == 'Copy') {
       // Копіювання в буфер обміну
+    } else if (action == 'Like') {
+      _toggleReaction(message['id'].toString());
     }
   }
 
@@ -446,17 +468,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                           );
 
                           return ChatMessageWidget(
-                            key: _messageKeys[index] ?? ValueKey(index),
+                            key: ValueKey(msg['id']),
                             showDateDivider: isNewDay,
+                            // Передаємо нові параметри як аргументи віджета:
+                            likesCount: msg['likes_count'] ?? 0,
+                            isLikedByMe: msg['is_liked_by_me'] ?? false,
                             message: ChatMessage(
-                              id: index.toString(),
-                              content: msg['content']?.toString() ?? "",
+                              id: msg['id'].toString(),
+                              content: msg['content']?.toString() ?? "", // Тільки один раз тут!
                               senderId: msg['sender_id']?.toString() ?? "0",
                               senderName: msg['sender_nickname'] ?? "User",
                               timestamp: msg['time'] is DateTime ? msg['time'] : DateTime.now(),
                               isMe: msg['isMe'] ?? false,
                               status: status,
                               replyToId: msg['reply_to_id']?.toString(),
+                              // likesCount та isLikedByMe прибираємо звідси, бо ми їх передали у віджет вище
                             ),
                             allMessages: _messages,
                             onActionSelected: (action) => _handleMessageAction(action, msg),
@@ -816,6 +842,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     );
   }
 
+  Future<void> _toggleReaction(String messageId) async {
+    final index = _messages.indexWhere((m) => m['id'] == messageId);
+    if (index == -1) return;
+
+    // Локальна зміна для UI
+    setState(() {
+      final bool oldState = _messages[index]['is_liked_by_me'] ?? false;
+      _messages[index]['is_liked_by_me'] = !oldState;
+      // Оновлюємо лічильник для краси:
+      final int currentCount = _messages[index]['likes_count'] ?? 0;
+      _messages[index]['likes_count'] = !oldState ? currentCount + 1 : currentCount - 1;
+    });
+
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/messages/$messageId/react'),
+        headers: await ApiService.getHeaders(),
+      );
+    } catch (e) {
+      // Відкат у разі помилки
+      setState(() {
+        _messages[index]['is_liked_by_me'] = !(_messages[index]['is_liked_by_me']);
+      });
+    }
+  }
+
 }
 
 
@@ -831,6 +883,8 @@ class ChatMessage {
   final bool isMe;
   final MessageStatus status;
   final String? replyToId;
+  int likesCount;
+  bool isLikedByMe;
 
   ChatMessage({
     required this.id,
@@ -842,21 +896,29 @@ class ChatMessage {
     required this.isMe,
     this.status = MessageStatus.sent,
     this.replyToId,
+    this.likesCount = 0,
+    this.isLikedByMe = false,
   });
 }
 
 class ChatMessageWidget extends StatefulWidget {
   final ChatMessage message;
+  final int likesCount;
+  final bool isLikedByMe;
   final Function(String) onActionSelected;
   final bool showDateDivider;
   final List<Map<String, dynamic>> allMessages;
 
+
   const ChatMessageWidget({
     super.key,
     required this.message,
+    required this.likesCount,
+    required this.isLikedByMe,
     required this.onActionSelected,
     required this.allMessages,
     this.showDateDivider = false,
+
   });
 
   @override
@@ -864,7 +926,6 @@ class ChatMessageWidget extends StatefulWidget {
 }
 
 class _ChatMessageWidgetState extends State<ChatMessageWidget> {
-  bool _isLiked = false;
   final GlobalKey _messageKey = GlobalKey();
   final LayerLink _layerLink = LayerLink();
 
@@ -1008,13 +1069,22 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     );
 
     Widget reactionIcon = GestureDetector(
-      onTap: () => setState(() => _isLiked = !_isLiked),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        child: Icon(
-          _isLiked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
-          size: 14,
-          color: _isLiked ? const Color(0xFF00F5A0) : const Color(0xFF6E6E80),
+      onTap: () => widget.onActionSelected('Like'),
+      child: SizedBox(
+        width: 24, // Фіксована ширина, щоб не смикалося
+        child: Column(
+          children: [
+            Icon(
+              widget.isLikedByMe ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
+              size: 18,
+              color: widget.isLikedByMe ? const Color(0xFF00F5A0) : const Color(0xFF6E6E80),
+            ),
+            if (widget.likesCount > 0) // Використовуй widget.likesCount
+              Text(
+                "${widget.likesCount}",
+                style: const TextStyle(color: Color(0xFF6E6E80), fontSize: 10),
+              ),
+          ],
         ),
       ),
     );
@@ -1023,8 +1093,14 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: widget.message.isMe
-          ? [reactionIcon, messageBox]
-          : [messageBox, reactionIcon],
+          ? [
+        Padding(padding: const EdgeInsets.only(right: 8), child: reactionIcon), // Додали відступ
+        messageBox
+      ]
+          : [
+        messageBox,
+        Padding(padding: const EdgeInsets.only(left: 8), child: reactionIcon)  // Додали відступ
+      ],
     );
   }
 
@@ -1037,6 +1113,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
 
     // Формуємо список елементів меню
     List<Map<String, dynamic>> menuItems = [
+      //{"title": "Like", "icon": const Icon(Icons.thumb_up_alt_outlined, size: 18), "color": const Color(0xFF00F5A0)},
       {"title": "Reply", "icon": const FigmaReplyIcon(), "color": const Color(0xFF00F5A0)},
       {"title": "Copy", "icon": const FigmaCopyIcon(), "color": const Color(0xFF00F5A0)},
       {"title": "Forward", "icon": const FigmaForwardIcon(), "color": const Color(0xFF00F5A0), "isForward": true},

@@ -9,6 +9,7 @@ import 'api_service.dart';
 import 'api_config.dart';
 import 'user_session.dart';
 import 'package:flutter/scheduler.dart';
+import 'services/chat_manager.dart';
 
 class ChatItem {
   final String id;
@@ -121,7 +122,6 @@ class _ChatListWidgetState extends State<ChatListWidget> {
   List<ChatItem> _chats = []; // Спочатку порожній
 
   Future<void> _fetchChats() async {
-    // Ми не робимо setState відразу, якщо є дані
     try {
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/chats/list'),
@@ -131,8 +131,18 @@ class _ChatListWidgetState extends State<ChatListWidget> {
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
 
-        // Оновлюємо дані БЕЗ прямого впливу на поточний кадр
         final List<ChatItem> newChats = data.map((json) => ChatItem.fromJson(json)).toList();
+
+        // --- ДОДАЙ ЦЮ ЛОГІКУ ---
+        // Рахуємо суму всіх непрочитаних повідомлень у всіх чатах
+        int totalUnread = 0;
+        for (var chat in newChats) {
+          totalUnread += chat.unreadCount;
+        }
+
+        // Оновлюємо глобальний менеджер, який підключений до BottomNavigation
+        ChatManager().setUnreadCount(totalUnread);
+        // -----------------------
 
         if (mounted) {
           setState(() {

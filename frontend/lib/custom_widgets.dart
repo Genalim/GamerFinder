@@ -432,11 +432,13 @@ class NeonNotificationBell extends StatelessWidget {
 class NeonBottomNavigator extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onTap;
+  final bool hasUnreadMessage;
 
   const NeonBottomNavigator({
     super.key,
     required this.selectedIndex,
     required this.onTap,
+    this.hasUnreadMessage = false,
   });
 
   // 1. Рідні SVG рядки для кожного стану
@@ -470,11 +472,13 @@ class NeonBottomNavigator extends StatelessWidget {
       decoration: const BoxDecoration(
         color: Color(0xFF181826), // background: #181826;
         border: Border(
-          top: BorderSide(color: Color(0xFF2B2B3B), width: 1), // border: 1px solid #2B2B3B;
+          top: BorderSide(
+              color: Color(0xFF2B2B3B), width: 1), // border: 1px solid #2B2B3B;
         ),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly, // автоматично вираховує gap: 55px
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        // автоматично вираховує gap: 55px
         children: [
           _buildItem(0, _homeSvg),
           _buildItem(1, _friendsSvg),
@@ -496,15 +500,34 @@ class NeonBottomNavigator extends StatelessWidget {
     return GestureDetector(
       onTap: () => onTap(index),
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 42,
-        height: 42,
-        alignment: Alignment.center,
-        child: SvgPicture.string(
-          dynamicSvg,
-          width: index == 1 ? 42 : 36, // Трохи коригуємо під пропорції макету
-          height: index == 1 ? 37 : 36,
-        ),
+      child: Stack(
+        clipBehavior: Clip.none, // Щоб крапка не обрізалася
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            child: SvgPicture.string(
+              dynamicSvg,
+              width: index == 1 ? 42 : 36,
+              height: index == 1 ? 37 : 36,
+            ),
+          ),
+          // НЕОНОВА КРАПКА
+          if (index == 2 && hasUnreadMessage) // Перевіряємо індекс і стан
+            Positioned(
+              right: 2,
+              top: 2,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF00F5A0),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

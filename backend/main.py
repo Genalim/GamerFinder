@@ -12,7 +12,7 @@ from fastapi import Query
 from chat_socket import sio
 
 from database import get_db, engine, Base
-from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message
+from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message, MessageReaction
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -1235,15 +1235,58 @@ async def get_or_create_chat(
     return {"chat_id": str(new_chat.id)}
 
 @app.get("/messages/{chat_id}")
-async def get_messages(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    # Тепер вибираємо повідомлення і додаємо reply_to_id у відповідь
-    stmt = select(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc())
+async def get_messages(
+        chat_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: Optional[int] = Depends(get_current_user_id)
+):
+    # 1. Формуємо підзапит
+    if current_user_id:
+        # Явно вказуємо .correlate(Message)
+        is_liked_subquery = select(MessageReaction.id).filter(
+            and_(
+                MessageReaction.message_id == Message.id,
+                MessageReaction.user_id == current_user_id
+            )
+        ).correlate(Message).exists()
+    else:
+        is_liked_subquery = False
+
+    # 2. Основний запит
+    stmt = (
+        select(
+            Message,
+            func.count(MessageReaction.id).label("likes_count"),
+            is_liked_subquery.label("is_liked_by_me")
+        )
+        .outerjoin(MessageReaction, Message.id == MessageReaction.message_id)
+        .filter(Message.chat_id == chat_id)
+        .group_by(Message.id)
+        .order_by(Message.created_at.asc())
+    )
+
     result = await db.execute(stmt)
-    messages = result.scalars().all()
+    # Змінюємо отримання результатів, бо тепер ми повертаємо кортежі (Message, count, is_liked)
+    rows = result.all()
 
-    # Повертаємо список, фронтенд отримає reply_to_id автоматично через Pydantic (якщо він є в схемі)
-    return messages
+    messages_with_likes = []
+    for row in rows:
+        msg = row[0] # Об'єкт Message
+        count = row[1] # Кількість лайків
+        is_liked = row[2] # True/False
 
+        msg_data = msg.__dict__.copy()
+        msg_data.pop('_sa_instance_state', None)
+
+        msg_data['likes_count'] = count
+        msg_data['is_liked_by_me'] = bool(is_liked)
+        msg_data['chat_id'] = str(msg_data['chat_id'])
+        msg_data['id'] = str(msg_data['id'])
+        msg_data['sender_id'] = str(msg_data['sender_id'])
+
+        messages_with_likes.append(msg_data)
+
+    return messages_with_likes
 
 @app.patch("/messages/read/{chat_id}")
 async def mark_messages_as_read(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
@@ -1350,6 +1393,51 @@ async def edit_message(
     }, room=str(message.chat_id))
 
     return {"status": "success"}
+
+@app.post("/messages/{message_id}/react")
+async def toggle_reaction(
+        message_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id) # Використовуємо твій ID
+):
+    # 1. Шукаємо, чи вже є лайк від цього юзера
+    stmt = select(MessageReaction).filter(
+        MessageReaction.message_id == message_id,
+        MessageReaction.user_id == current_user_id
+    )
+    result = await db.execute(stmt)
+    existing = result.scalars().first()
+
+    if existing:
+        # Видаляємо (якщо вже є)
+        await db.delete(existing)
+        action = "removed"
+    else:
+        # Додаємо (якщо немає)
+        new_reaction = MessageReaction(message_id=message_id, user_id=current_user_id)
+        db.add(new_reaction)
+        action = "added"
+
+    await db.commit()
+
+    # 2. Рахуємо загальну кількість лайків для цього повідомлення
+    count_res = await db.execute(
+        select(func.count(MessageReaction.id)).filter(MessageReaction.message_id == message_id)
+    )
+    count = count_res.scalar() or 0
+
+    # 3. Емітимо подію в сокет
+    msg_res = await db.execute(select(Message.chat_id).filter(Message.id == message_id))
+    chat_id = msg_res.scalar()
+
+    if chat_id:
+        await sio.emit('reaction_updated', {
+            'message_id': str(message_id),
+            'count': count,
+            'is_liked_by_me': action == 'added'
+        }, room=str(chat_id))
+
+    return {"status": "success", "action": action, "count": count}
 
 
 

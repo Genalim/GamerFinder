@@ -5,6 +5,8 @@ class ChatManager {
   static final ChatManager _instance = ChatManager._internal();
   factory ChatManager() => _instance;
   ChatManager._internal();
+  int _unreadCount = 0;
+  int get unreadCount => _unreadCount;
 
   IO.Socket? _socket;
 
@@ -33,6 +35,8 @@ class ChatManager {
       'reconnectionAttempts': 5,
     });
 
+
+
     // Підключення
     _socket!.onConnect((_) {
       print('DEBUG: Сокет підключено!');
@@ -51,6 +55,10 @@ class ChatManager {
     _socket!.onConnectError((err) => print('DEBUG: Помилка підключення: $err'));
     _socket!.onError((err) => print('DEBUG: Помилка сокета: $err'));
 
+    _socket!.onAny((event, data) {
+      print('DEBUG: ВІД СЕРВЕРА ПРИЙШЛА ПОДІЯ: "$event" | Дані: $data');
+    });
+
     _socket!.connect();
   }
 
@@ -65,5 +73,15 @@ class ChatManager {
       'content': content,
       'reply_to_id': replyTo,
     });
+  }
+
+  //Count messagre for chat in navigation
+  Function()? onUnreadChanged;
+
+  void setUnreadCount(int count) {
+    _unreadCount = count;
+    if (onUnreadChanged != null) {
+      onUnreadChanged!();
+    }
   }
 }
