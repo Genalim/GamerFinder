@@ -667,18 +667,34 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                   activeTab: _activeNotificationTab, // Додайте цю змінну в стан State
                   onTabChange: (tab) => setState(() => _activeNotificationTab = tab),
                   onAccept: (item) async {
-                    bool success = await ApiService.acceptGameInvite(item.id);
-                    if (success && mounted) {
+                    // Викликаємо оновлений метод
+                    final response = await ApiService.acceptGameInvite(item.id);
+
+                    if (response != null && response.containsKey('chat_id') && mounted) {
+                      String chatId = response['chat_id']; // Беремо ID чату з відповіді
+
+                      // Видаляємо з UI
                       setState(() => _notifications.removeWhere((n) => n.id == item.id));
+
+                      // Закриваємо оверлей
+                      setState(() => _isNotificationsOpen = false);
+
+                      // Відкриваємо чат
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => ChatRoomScreen(
                             friendName: item.userNickname,
+                            chatId: chatId,
                             friendId: item.senderId,
                             onBack: () => Navigator.pop(context),
                           ),
                         ),
+                      );
+                    } else {
+                      // Обробка помилки
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Could not accept invite")),
                       );
                     }
                   },

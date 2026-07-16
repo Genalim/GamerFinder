@@ -132,10 +132,16 @@ class RatingRequest(Base):
 #Chats
 class Chat(Base):
     __tablename__ = 'chats'
+    __table_args__ = {'extend_existing': True}  # <--- Додай це
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, nullable=True) # Назва групи
+    name = Column(String, nullable=True)
     is_group = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    admin_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    avatar_url = Column(String, nullable=True)
+    description = Column(String, nullable=True)
 
 class ChatMember(Base):
     __tablename__ = 'chat_members'
@@ -164,4 +170,14 @@ class MessageReaction(Base):
     reaction_type = Column(String, default='like')
     created_at = Column(DateTime, default=datetime.utcnow)
     message = relationship("Message", back_populates="reactions")
+
+class ChatHidden(Base):
+    __tablename__ = 'chat_hidden'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'), index=True)
+    hidden_at = Column(DateTime, default=datetime.utcnow)
+
+
 

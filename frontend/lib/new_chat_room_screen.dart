@@ -12,6 +12,10 @@ import 'api_service.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui';
 import 'dart:ui' as ui;
+import 'chats_screen.dart';
+import 'chat_forward_screen.dart';
+import 'package:flutter/services.dart';
+import 'models.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String friendName;
@@ -91,18 +95,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     ChatManager().init(myId);
 
     // Очищення та підписка на нові повідомлення
-    ChatManager().socket.off('new_message');
-    ChatManager().socket.on('new_message', (data) {
+    ChatManager().socket?.off('new_message');
+    ChatManager().socket?.on('new_message', (data) {
       _addNewMessageToUi(data);
     });
 
     // --- НОВЕ: ПІДПИСКА НА ПРОЧИТАННЯ ---
-    ChatManager().socket.off('messages_read');
-    ChatManager().socket.on('messages_read', (data) {
+    ChatManager().socket?.off('messages_read');
+    ChatManager().socket?.on('messages_read', (data) {
       _markMessagesAsReadUi(data['chat_id']);
     });
     // --- Подія від серверу (конектид чи ні) ---//
-    ChatManager().socket.on('user_typing', (data) {
+    ChatManager().socket?.on('user_typing', (data) {
       if (data['chat_id'] == _activeChatId) {
         setState(() => _isTyping = true);
         // Через 3 секунди прибираємо "typing..."
@@ -112,8 +116,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       }
     });
 
-    ChatManager().socket.off('message_edited');
-    ChatManager().socket.on('message_edited', (data) {
+    ChatManager().socket?.off('message_edited');
+    ChatManager().socket?.on('message_edited', (data) {
       if (!mounted) return;
 
       final String messageId = data['message_id'].toString();
@@ -153,14 +157,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     _textController.addListener(() {
       // Коли щось друкуємо, посилаємо сигнал
       if (_activeChatId != null && _textController.text.isNotEmpty) {
-        ChatManager().socket.emit('typing', {'chat_id': _activeChatId});
+        ChatManager().socket?.emit('typing', {'chat_id': _activeChatId});
       }
       // Логіка оновлення іконки Send
       final isEmpty = _textController.text.trim().isEmpty;
       if (_isInputEmpty != isEmpty) setState(() => _isInputEmpty = isEmpty);
     });
 
-    ChatManager().socket.on('reaction_updated', (data) {
+    ChatManager().socket?.on('reaction_updated', (data) {
       if (!mounted) return;
       setState(() {
         final index = _messages.indexWhere((m) => m['id'] == data['message_id']);
@@ -172,6 +176,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     });
 
     _messages.sort((a, b) => a['time'].compareTo(b['time']));
+
+    //Check if message was deleted
+    ChatManager().socket?.off('message_deleted');
+    ChatManager().socket?.on('message_deleted', (data) {
+      if (!mounted) return;
+
+      if (data['chat_id'] == _activeChatId) {
+        setState(() {
+          _messages.removeWhere((m) => m['id'] == data['message_id'].toString());
+        });
+      }
+    });
+
   }
 
   // Окремий метод для завантаження історії
@@ -339,6 +356,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   void _addNewMessageToUi(Map<String, dynamic> messageData) {
     if (!mounted) return;
 
+    // Якщо ID чату в повідомленні не збігається з поточним — ігноруємо
+    if (messageData['chat_id'] != _activeChatId) {
+      return;
+    }
+
     final String senderId = messageData['sender_id'].toString();
     final String content = messageData['content'];
     final DateTime time = _parseDateTime(messageData['created_at'] ?? DateTime.now());
@@ -378,6 +400,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     _handleInitialScroll();
   }
 
+  String _removeForwardTag(String content) {
+    return content.replaceAll(RegExp(r'^\[FWD:[^\]]+\]'), '');
+  }
+
   final ScrollController _scrollController = ScrollController();
 
 // Метод для прокрутки вниз
@@ -401,27 +427,114 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     }
   }
 
+
   void _handleMessageAction(String action, Map<String, dynamic> message) {
+    // Витягуємо "чистий" контент один раз тут
+    final String rawContent = message['content'].toString();
+    final String cleanContent = getCleanContent(message['content'].toString());
+
     if (action == 'Edit') {
       setState(() {
         _messageToEdit = message;
-        _textController.text = message['content'];
+        // В інпут для редагування ставимо ЧИСТИЙ текст
+        _textController.text = cleanContent;
         _isInputEmpty = false;
       });
-      _focusNode.requestFocus(); // Фокусуємо клавіатуру
+      _focusNode.requestFocus();
     } else if (action == 'Reply') {
       setState(() {
-        _messageToReply = message; // Зберігаємо повідомлення для відповіді
+        _messageToReply = message; // Зберігаємо як було
         _messageToEdit = null;
-        _textController.clear(); // Очищаємо інпут для нової відповіді
+        _textController.clear();
       });
       _focusNode.requestFocus();
+    } else if (action == 'Forward') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatForwardScreen(
+            messageId: message['id'].toString(),
+            // Форвардимо ЧИСТИЙ текст
+            messageContent: cleanContent,
+          ),
+        ),
+      );
     } else if (action == 'Delete') {
-      // Тут логіка видалення через API
+      _deleteMessage(message['id'].toString());
     } else if (action == 'Copy') {
-      // Копіювання в буфер обміну
+      // Копіюємо ЧИСТИЙ текст
+      Clipboard.setData(ClipboardData(text: cleanContent)).then((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Copied to clipboard", style: TextStyle(color: Colors.white)),
+            backgroundColor: Color(0xFF181826),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      });
     } else if (action == 'Like') {
       _toggleReaction(message['id'].toString());
+    }
+  }
+
+  Future<void> _deleteMessage(String messageId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/messages/$messageId'),
+        headers: await ApiService.getHeaders(),
+      );
+
+      if (response.statusCode == 200) {
+        // Локальне видалення (якщо сервер не встиг емітнути сокет)
+        setState(() {
+          _messages.removeWhere((m) => m['id'] == messageId);
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка видалення: $e");
+    }
+  }
+
+  Future<void> _fetchFriendsAndOpenGroupScreen() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+        headers: await ApiService.getHeaders(),
+      );
+
+      if (response.statusCode == 200 && mounted) {
+        List<dynamic> list = json.decode(response.body);
+
+        // Перетворюємо список на FriendItem (як того очікує ChatAddFriendsGroupScreen)
+        List<FriendItem> friends = list.map((item) {
+          final data = item['user'] ?? item;
+          final nickname = data['nickname'] ?? 'Unknown';
+          final userId = data['id'] ?? 0;
+
+          return FriendItem(
+            id: userId,
+            name: nickname,
+            status: data['is_online'] == true ? 'online' : 'offline',
+            initial: nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
+            isOnline: data['is_online'] ?? false,
+          );
+        }).toList();
+
+        // Тепер відкриваємо екран із завантаженим списком
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatAddFriendsGroupScreen(
+              onClose: () => Navigator.pop(context),
+              currentFriendName: widget.friendName,
+              friendsList: friends, // Передаємо завантажений список!
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Помилка завантаження друзів для групи: $e");
     }
   }
 
@@ -530,7 +643,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           GestureDetector(
-            onTap: widget.onBack,
+            onTap: () {
+              // ДОДАЙ ЦЕЙ РЯДОК:
+              ChatListWidget.onRefreshRequested?.call();
+
+              // А потім вже виконуй дію "назад"
+              widget.onBack();
+            },
             child: const SizedBox(width: 40, height: 40, child: ChatBackIcon(size: 24)),
           ),
           Row(
@@ -572,7 +691,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
               ),
             ],
           ),
-          const ChatAddGroupIcon(size: 42),
+          GestureDetector(
+            onTap: () {
+              // Викликаємо метод, який спочатку вантажить друзів, а потім відкриває екран
+              _fetchFriendsAndOpenGroupScreen();
+            },
+            child: const ChatAddGroupIcon(size: 42),
+          ),
         ],
       ),
     );
@@ -870,7 +995,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
 }
 
-
+String getCleanContent(String content) {
+  if (content.startsWith('[FWD:')) {
+    final endIdx = content.indexOf(']');
+    if (endIdx != -1) {
+      return content.substring(endIdx + 1);
+    }
+  }
+  return content;
+}
 
 enum MessageStatus { sent, delivered, read }
 class ChatMessage {
@@ -986,6 +1119,9 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
   }
 
   Widget _buildMessageContainer() {
+    String rawContent = widget.message.content;
+    String? fwdName;
+    String displayContent = rawContent;
     String formattedTime = DateFormat('HH:mm').format(widget.message.timestamp.toLocal());
     final double maxWidth = MediaQuery.of(context).size.width * 0.75;
 
@@ -994,6 +1130,15 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     final replyMsg = (widget.message.replyToId != null)
         ? widget.allMessages.firstWhere((m) => m['id'] == widget.message.replyToId, orElse: () => {})
         : {};
+
+    if (rawContent.startsWith('[FWD:')) {
+      final match = RegExp(r'^\[FWD:([^\]]+)\](.*)').firstMatch(rawContent);
+      if (match != null) {
+        fwdName = match.group(1);
+        displayContent = match.group(2) ?? "";
+      }
+    }
+
 
     Widget replyBlock = const SizedBox.shrink();
     if (replyMsg.isNotEmpty) {
@@ -1021,6 +1166,19 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         ),
       );
     }
+
+    Widget forwardBlock = fwdName != null ? Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: widget.message.isMe ? Colors.black.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+        border: Border(left: BorderSide(color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), width: 2)),
+      ),
+      child: Text("Forwarded from $fwdName", style: TextStyle(
+          color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0),
+          fontSize: 10, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic
+      )),
+    ) : const SizedBox.shrink();
 
     Widget timeAndStatus = Row(
       mainAxisSize: MainAxisSize.min,
@@ -1054,8 +1212,9 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               replyBlock, // Доданий блок відповіді
+              forwardBlock,
               Text(
-                widget.message.content,
+                getCleanContent(widget.message.content), // Викликаємо глобальну функцію
                 style: TextStyle(
                   color: widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white,
                   fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter',

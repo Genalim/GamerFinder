@@ -10,6 +10,8 @@ import 'api_config.dart';
 import 'user_session.dart';
 import 'package:flutter/scheduler.dart';
 import 'services/chat_manager.dart';
+import 'main.dart';
+import 'group_chat_room_screen.dart';
 
 class ChatItem {
   final String id;
@@ -67,13 +69,14 @@ class ChatsScreen extends StatefulWidget {
   State<ChatsScreen> createState() => _ChatsScreenState();
 }
 
-class _ChatsScreenState extends State<ChatsScreen> with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
+class _ChatsScreenState extends State<ChatsScreen> {
+  // Додаємо глобальний ключ для навігатора
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     return Navigator(
+      key: _navigatorKey, // Прив'язуємо ключ
       onGenerateRoute: (settings) => MaterialPageRoute(builder: (context) => const ChatListWidget()),
     );
   }
@@ -81,45 +84,89 @@ class _ChatsScreenState extends State<ChatsScreen> with AutomaticKeepAliveClient
 
 class ChatListWidget extends StatefulWidget {
   const ChatListWidget({super.key});
+
+  static void Function()? onRefreshRequested;
+
   @override
   State<ChatListWidget> createState() => _ChatListWidgetState();
 }
 
-class _ChatListWidgetState extends State<ChatListWidget> {
+class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
   String _searchQuery = "";
 
+  bool _hasFetched = false;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Це спрацює, коли ми повернемося на цей екран
+    // Викликаємо тільки якщо ще не завантажували дані в цій сесії екрану
+    if (!_hasFetched) {
+      _fetchChats();
+      _hasFetched = true;
+    }
+  }
+  @override
+  void didPopNext() {
+    super.didPopNext();
+    debugPrint("DEBUG: Повернення в список чатів, оновлюємо...");
     _fetchChats();
   }
 
-  // Додаємо цей список, щоб передавати його в ChatRoomScreen
-  //final List<FriendItem> _allFriends = [
-   // FriendItem(name: 'ALEX', status: 'online', initial: 'A', isOnline: true),
-   // FriendItem(name: 'NOVA', status: 'was online 1 hour ago', initial: 'N', isOnline: false),
-   // FriendItem(name: 'Peter', status: 'was online a year ago', initial: 'P', isOnline: false),
-   // FriendItem(name: 'MMA_boxer', status: 'was online yesterday at 10:05 PM', initial: 'M', isOnline: false),
- // ];
+  @override
+  void didPushNext() {
+  }
 
-  //final List<ChatItem> _chats = [
-   // ChatItem(title: 'Mario_gamer', lastMessage: 'Last message', time: '5min ago', unreadCount: 2, isPro: true, userInitials: ['M'], status: 'unread'),
-    //ChatItem(title: 'Sam', lastMessage: 'Last message', time: '5min agi', unreadCount: 12, isPro: false, userInitials: ['S'], status: 'unread'),
-    //ChatItem(title: 'NOVA', lastMessage: 'Last message...', time: '13:39', unreadCount: 0, isPro: true, userInitials: ['N'], status: 'read'),
-    //ChatItem(title: 'Valorant Squad', lastMessage: 'GG WP', time: '1h ago', unreadCount: 5, isPro: true, isGroupChat: true, userInitials: ['N', 'A', 'M', 'P'], status: 'unread'),
-    //ChatItem(title: 'Player_4', lastMessage: 'Hey, let\'s play!', time: '10m ago', unreadCount: 0, isPro: false, userInitials: ['P'], status: 'sent'),
-    //ChatItem(title: 'Alex', lastMessage: 'See you later', time: '2h ago', unreadCount: 0, isPro: false, userInitials: ['A'], status: 'delivered'),
-    //ChatItem(title: 'Max', lastMessage: 'What is the plan?', time: '3h ago', unreadCount: 1, isPro: true, userInitials: ['M'], status: 'unread'),
-  //];
 
   @override
   void initState() {
     super.initState();
-    _fetchChats(); // Завантажуємо дані при старті екрану
+    _fetchChats();
+
+    // 1. Реєструємо функцію для примусового оновлення
+    ChatListWidget.onRefreshRequested = _fetchChats;
+
+    // 2. Залишаємо підписки на сокети (це важливо для реактивності)
+    ChatManager().socket?.on('new_chat_created', (data) {
+      debugPrint("DEBUG: Прийшла подія про новий чат!");
+      _fetchChats();
+    });
+
+    ChatManager().socket?.on('new_message', (data) {
+      debugPrint("DEBUG: Прийшло нове повідомлення!");
+      _fetchChats();
+    });
   }
 
   List<ChatItem> _chats = []; // Спочатку порожній
+
+  @override
+  void dispose() {
+    // 3. Очищаємо "гачок" для оновлення
+    ChatListWidget.onRefreshRequested = null;
+
+    // 4. Очищаємо підписки на сокети
+    ChatManager().socket?.off('new_chat_created');
+    ChatManager().socket?.off('new_message');
+
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchChats(); // Оновлюємо, коли програма стає активною
+    }
+  }
+
+  void refreshData() {
+    debugPrint("DEBUG: Примусове оновлення чатів з MainNavigationScreen");
+    _fetchChats();
+  }
+
+  void forceRefresh() {
+    debugPrint("DEBUG: Примусове оновлення списку чатів!");
+    _fetchChats();
+  }
 
   Future<void> _fetchChats() async {
     try {
@@ -128,21 +175,18 @@ class _ChatListWidgetState extends State<ChatListWidget> {
         headers: await ApiService.getHeaders(),
       );
 
+      // ОСЬ ТУТ ТВОЇ ДЕТЕКТИВИ:
+      debugPrint("DEBUG API: Статус ${response.statusCode}");
+      debugPrint("DEBUG API: Відповідь ${response.body}");
+
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
 
-        final List<ChatItem> newChats = data.map((json) => ChatItem.fromJson(json)).toList();
-
-        // --- ДОДАЙ ЦЮ ЛОГІКУ ---
-        // Рахуємо суму всіх непрочитаних повідомлень у всіх чатах
-        int totalUnread = 0;
-        for (var chat in newChats) {
-          totalUnread += chat.unreadCount;
+        if (data.isEmpty) {
+          debugPrint("DEBUG: Сервер повернув порожній список чатів!");
         }
 
-        // Оновлюємо глобальний менеджер, який підключений до BottomNavigation
-        ChatManager().setUnreadCount(totalUnread);
-        // -----------------------
+        final List<ChatItem> newChats = data.map((json) => ChatItem.fromJson(json)).toList();
 
         if (mounted) {
           setState(() {
@@ -151,7 +195,7 @@ class _ChatListWidgetState extends State<ChatListWidget> {
         }
       }
     } catch (e) {
-      debugPrint("Помилка: $e");
+      debugPrint("Помилка при завантаженні чатів: $e");
     }
   }
 
@@ -163,27 +207,43 @@ class _ChatListWidgetState extends State<ChatListWidget> {
   }
 
   void _openChat(dynamic chatOrName) {
-    print("DEBUG: Відкриваємо чат з title: '${chatOrName.title}', id: '${chatOrName.id}'");
+    debugPrint("DEBUG: Відкриваємо чат: $chatOrName");
 
     if (chatOrName is ChatItem) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatRoomScreen(
-            friendName: chatOrName.title,
-            chatId: chatOrName.id,
-            friendId: chatOrName.recipientId?.toString(),
-            onBack: _closeAndRefresh, // Викликаємо наш новий метод
+      // Перевіряємо тип чату
+      if (chatOrName.isGroupChat) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => GroupChatRoomScreen(
+              chatId: chatOrName.id,
+              participantNames: chatOrName.userInitials, // Ініціали, що приходять з бекенду
+              onBack: _closeAndRefresh, // Зберігаємо метод оновлення
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        // Особистий чат
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatRoomScreen(
+              friendName: chatOrName.title,
+              chatId: chatOrName.id,
+              friendId: chatOrName.recipientId?.toString(),
+              onBack: _closeAndRefresh, // Зберігаємо метод оновлення
+            ),
+          ),
+        );
+      }
     } else if (chatOrName is String) {
+      // Випадок, коли приходить тільки ім'я (наприклад, з NewMessageScreen)
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChatRoomScreen(
             friendName: chatOrName,
-            onBack: _closeAndRefresh, // І тут також
+            onBack: _closeAndRefresh, // Зберігаємо метод оновлення[cite: 3]
           ),
         ),
       );
@@ -207,7 +267,17 @@ class _ChatListWidgetState extends State<ChatListWidget> {
                       child: Align(
                           alignment: Alignment.centerLeft,
                           child: GestureDetector(
-                              onTap: () => setState(() => _chats.forEach((c) => c.unreadCount = 0)),
+                              onTap: () async {
+                                // 1. Оновлюємо на бекенді для кожного чату
+                                for (var chat in _chats) {
+                                  if (chat.unreadCount > 0) {
+                                    await ApiService.markAllAsRead(chat.id);
+                                  }
+                                }
+                                // 2. Оновлюємо UI
+                                setState(() => _chats.forEach((c) => c.unreadCount = 0));
+                                ChatManager().setUnreadCount(0);
+                              },
                               child: Row(children: [
                                 ChatsHeaderCheckbox(isChecked: _chats.every((c) => c.unreadCount == 0)),
                                 const SizedBox(width: 8),
@@ -259,6 +329,7 @@ class _ChatListWidgetState extends State<ChatListWidget> {
                 padding: const EdgeInsets.only(top: 10),
                 itemCount: filteredChats.length,
                 itemBuilder: (context, index) => GestureDetector(
+                    onLongPress: () => _showChatOptions(filteredChats[index]),
                     onTap: () => _openChat(filteredChats[index]),
                     child: _buildChatTile(filteredChats[index])
                 ),
@@ -318,7 +389,7 @@ class _ChatListWidgetState extends State<ChatListWidget> {
                       const SizedBox(width: 4),
                       Text(
                           chat.rating != null ? chat.rating!.toStringAsFixed(1) : '0.0',
-                          style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 7, fontWeight: FontWeight.bold)
+                          style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 13, fontWeight: FontWeight.bold)
                       ),
                     ]
                     // Якщо Я - НЕ Про, бачу зірку та "PRO Only"
@@ -435,4 +506,39 @@ class _ChatListWidgetState extends State<ChatListWidget> {
       ),
     );
   }
+
+  void _showChatOptions(ChatItem chat) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF181826),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text("Delete Chat", style: TextStyle(color: Colors.red)),
+            onTap: () {
+              Navigator.pop(context); // Закриваємо шторку
+              _hideChat(chat.id);      // Викликаємо API приховування
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _hideChat(String chatId) async {
+    // Викликаєш свій endpoint, наприклад: PATCH /chats/$chatId/hide
+    final response = await http.patch(
+      Uri.parse('${ApiConfig.baseUrl}/chats/$chatId/hide'),
+      headers: await ApiService.getHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      // Оновлюєш UI
+      ChatListWidget.onRefreshRequested?.call();
+    }
+  }
+
 }

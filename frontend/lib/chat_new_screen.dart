@@ -53,6 +53,7 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
             _friendIdMap[nickname] = userId;
 
             return FriendItem(
+              id: userId,
               name: nickname,
               status: data['is_online'] == true ? 'online' : 'offline',
               initial: nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',

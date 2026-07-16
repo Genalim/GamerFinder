@@ -12,7 +12,7 @@ from fastapi import Query
 from chat_socket import sio
 
 from database import get_db, engine, Base
-from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message, MessageReaction
+from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message, MessageReaction, ChatHidden
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
 from fastapi import File, UploadFile
@@ -1054,29 +1054,67 @@ async def accept_notification(
         notification_id: str,
         db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Notification).filter(Notification.id == notification_id)
-    )
+    # 1. Знаходимо нотифікацію
+    result = await db.execute(select(Notification).filter(Notification.id == notification_id))
     notif = result.scalars().first()
 
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    # Просто змінюємо статус на 'accepted'
+    # 2. Змінюємо статус та додаємо запит на рейтинг (як було в тебе)
     notif.state = "accepted"
-
-    # Додаємо запис, щоб через час надіслати нотифікацію про рейтинг
     new_rating_req = RatingRequest(
         sender_id=notif.sender_id,
         receiver_id=notif.recipient_id,
-        game_id=1, # Тут треба брати реальний ID гри, якщо він є в Notif
+        game_id=1,
         is_notification_sent=False,
         is_rated=False
     )
     db.add(new_rating_req)
 
+    # 3. Логіка отримання/створення чату
+    # Шукаємо існуючий приватний чат між цими двома
+    stmt = text("""
+        SELECT cm.chat_id 
+        FROM chat_members cm
+        JOIN chats c ON cm.chat_id = c.id
+        WHERE c.is_group = FALSE AND cm.user_id IN (:u1, :u2)
+        GROUP BY cm.chat_id
+        HAVING COUNT(DISTINCT cm.user_id) = 2
+    """)
+    res = await db.execute(stmt, {"u1": notif.sender_id, "u2": notif.recipient_id})
+    chat_id = res.scalar()
+
+    if not chat_id:
+        # Створюємо новий чат, якщо немає
+        new_chat = Chat(is_group=False)
+        db.add(new_chat)
+        await db.flush()
+        chat_id = new_chat.id
+        db.add(ChatMember(chat_id=chat_id, user_id=notif.sender_id))
+        db.add(ChatMember(chat_id=chat_id, user_id=notif.recipient_id))
+        await db.flush()
+
+    # 4. Додаємо автоматичне повідомлення
+    auto_msg = Message(
+        chat_id=chat_id,
+        sender_id=notif.sender_id,
+        content=f"Lets play {notif.game}!!!",
+        status="sent"
+    )
+    db.add(auto_msg)
+
+    # 5. Фіксуємо все в БД одним махом
     await db.commit()
-    return {"status": "accepted"}
+
+    # 6. Емітимо подію через сокет, щоб чат відкрився і повідомлення з'явилося
+    await sio.emit('new_message', {
+        'chat_id': str(chat_id),
+        'content': auto_msg.content,
+        'sender_id': notif.sender_id
+    }, room=str(chat_id))
+
+    return {"status": "accepted", "chat_id": str(chat_id)}
 
 @app.patch("/notifications/{notification_id}/update-status")
 async def update_notification_status(
@@ -1315,14 +1353,22 @@ async def get_chats(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
 ):
-    # Знаходимо всі чати, де бере участь користувач
+    # 1. Створюємо підзапит для отримання всіх прихованих чатів користувача
+    hidden_chats_subquery = select(ChatHidden.chat_id).where(ChatHidden.user_id == current_user.id).scalar_subquery()
+
+    # 2. Вибираємо чати, яких НЕМАЄ в прихованих
     result = await db.execute(
-        select(Chat).join(ChatMember).where(ChatMember.user_id == current_user.id)
+        select(Chat)
+        .join(ChatMember)
+        .where(ChatMember.user_id == current_user.id)
+        .where(Chat.id.not_in(hidden_chats_subquery)) # ОСЬ ТУТ ФІЛЬТР
     )
     chats = result.scalars().all()
 
     response = []
     for chat in chats:
+        print(f"DEBUG: Обробляю чат {chat.id}") # Це покаже в консолі сервера, чи доходить цикл до чату
+        # ...
         # Останнє повідомлення
         msg_res = await db.execute(
             select(Message).where(Message.chat_id == chat.id).order_by(desc(Message.created_at)).limit(1)
@@ -1344,6 +1390,7 @@ async def get_chats(
             select(User).join(ChatMember).where(ChatMember.chat_id == chat.id, ChatMember.user_id != current_user.id)
         )
         others = members_res.scalars().all()
+        print(f"DEBUG: Учасників знайдено: {len(others)}")
 
         response.append({
             "chat_id": str(chat.id),
@@ -1438,6 +1485,253 @@ async def toggle_reaction(
         }, room=str(chat_id))
 
     return {"status": "success", "action": action, "count": count}
+
+@app.patch("/chats/{chat_id}/hide")
+async def hide_chat(
+        chat_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # Додаємо запис, що чат прихований для цього юзера
+    hidden_chat = ChatHidden(user_id=current_user_id, chat_id=chat_id)
+    db.add(hidden_chat)
+    await db.commit()
+    return {"status": "ok"}
+
+@app.post("/messages/forward")
+async def forward_message(
+        data: dict,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    message_id = data.get("message_id")
+    target_chat_ids = data.get("target_chat_ids")
+
+    res = await db.execute(select(Message).filter(Message.id == message_id))
+    original_msg = res.scalars().first()
+    if not original_msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # ДОДАЄМО: Шукаємо нікнейм того, хто відправив оригінал
+    sender_res = await db.execute(select(User.nickname).filter(User.id == original_msg.sender_id))
+    sender_nickname = sender_res.scalar() or "Unknown"
+
+    for chat_id in target_chat_ids:
+        # Зберігаємо у форматі: [FWD:Никнейм]Текст
+        new_msg = Message(
+            chat_id=chat_id,
+            sender_id=current_user_id,
+            content=f"[FWD:{sender_nickname}]{original_msg.content}",
+            status="sent"
+        )
+        db.add(new_msg)
+        await sio.emit('new_message', {
+            'chat_id': str(chat_id),
+            'content': new_msg.content,
+            'sender_id': current_user_id,
+            'created_at': datetime.utcnow().isoformat()
+        }, room=str(chat_id))
+
+    await db.commit()
+    return {"status": "success"}
+
+@app.delete("/messages/{message_id}")
+async def delete_message(
+        message_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    # 1. Знаходимо повідомлення
+    result = await db.execute(select(Message).filter(Message.id == message_id))
+    message = result.scalars().first()
+
+    # 2. Перевірка: чи воно існує і чи належить користувачу
+    if not message or message.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Не можна видалити це повідомлення")
+
+    chat_id = message.chat_id
+
+    # 3. Видаляємо з БД
+    await db.delete(message)
+    await db.commit()
+
+    # 4. Оповіщаємо іншого користувача через Socket.io, щоб видалити його в реальному часі
+    await sio.emit('message_deleted', {
+        'message_id': str(message_id),
+        'chat_id': str(chat_id)
+    }, room=str(chat_id))
+
+    return {"status": "success"}
+
+@app.post("/chats/create-group")
+async def create_group_chat(
+        data: dict,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    name = data.get("name", "New Group")
+    target_user_ids = list(set(data.get("user_ids", []) + [current_user_id]))
+
+    # Використовуємо функцію ANY для порівняння з масивом (ARRAY)
+    # count - це кількість учасників, яку ми очікуємо
+    # uids - це список ID учасників
+    stmt = text("""
+        SELECT cm.chat_id 
+        FROM chat_members cm
+        JOIN chats c ON cm.chat_id = c.id
+        WHERE c.is_group = TRUE
+        GROUP BY cm.chat_id
+        HAVING COUNT(DISTINCT cm.user_id) = :count
+        AND COUNT(DISTINCT CASE WHEN cm.user_id = ANY(:uids) THEN cm.user_id END) = :count
+    """)
+
+    # У PostgreSQL масиви передаються як списки (у Python-списках)
+    res = await db.execute(stmt, {
+        "uids": target_user_ids,
+        "count": len(target_user_ids)
+    })
+    existing_chat_id = res.scalar()
+
+    if existing_chat_id:
+        return {"chat_id": str(existing_chat_id)}
+
+    # Якщо чату немає — створюємо новий
+    new_chat = Chat(name=name, is_group=True, admin_id=current_user_id)
+    db.add(new_chat)
+    await db.flush()
+
+    for uid in target_user_ids:
+        db.add(ChatMember(chat_id=new_chat.id, user_id=uid))
+
+    await db.commit()
+    return {"chat_id": str(new_chat.id)}
+
+@app.get("/chats/{chat_id}/info")
+async def get_chat_info(
+        chat_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Знаходимо чат
+    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = result.scalars().first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # 2. Отримуємо учасників
+    stmt = select(User).join(ChatMember).filter(ChatMember.chat_id == chat_id)
+    res_members = await db.execute(stmt)
+    members = res_members.scalars().all()
+
+    # 3. Формуємо список учасників з їхнім статусом (адмін чи ні)
+    members_data = []
+    for m in members:
+        members_data.append({
+            "id": m.id,
+            "nickname": m.nickname,
+            "is_admin": m.id == chat.admin_id,
+            "avatar": m.avatar,
+            "is_online": m.is_online
+        })
+
+    return {
+        "chat_id": str(chat.id),
+        "name": chat.name,
+        "avatar_url": chat.avatar_url,
+        "admin_id": chat.admin_id,
+        "members": members_data,
+        "is_me_admin": current_user_id == chat.admin_id
+    }
+# Ендпоінт для оновлення назви групи
+@app.patch("/group_chats/{chat_id}/name")
+async def update_chat_name(
+        chat_id: uuid.UUID,
+        data: dict, # Очікуємо {"name": "New Name"}
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = result.scalars().first()
+
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # Перевіряємо, чи юзер адмін
+    if chat.admin_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Only admin can change group name")
+
+    chat.name = data.get("name", chat.name)
+    await db.commit()
+    return {"status": "success", "new_name": chat.name}
+
+# Ендпоінт для завантаження аватарки групи
+@app.post("/group_chats/{chat_id}/avatar")
+async def upload_chat_avatar(
+        chat_id: uuid.UUID,
+        file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Знаходимо чат
+    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = result.scalars().first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # Перевірка адміна
+    if chat.admin_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Only admin can change avatar")
+
+    # 2. Зберігаємо файл
+    file_extension = file.filename.split(".")[-1]
+    file_name = f"group_{chat_id}_{uuid.uuid4()}.{file_extension}"
+    file_location = f"uploads/avatars/{file_name}"
+
+    with open(file_location, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # 3. Оновлюємо посилання в базі
+    chat.avatar_url = f"http://127.0.0.1:8000/{file_location}"
+    await db.commit()
+
+    return {"url": chat.avatar_url}
+
+@app.delete("/group_chats/{chat_id}/leave")
+async def leave_group_chat(
+        chat_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Знаходимо чат
+    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = result.scalars().first()
+    if not chat: raise HTTPException(status_code=404, detail="Chat not found")
+
+    # 2. Знаходимо запис членства юзера
+    stmt_member = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id == current_user_id)
+    member_res = await db.execute(stmt_member)
+    member = member_res.scalars().first()
+    if not member: raise HTTPException(status_code=404, detail="Not a member")
+
+    # 3. Якщо адмін виходить
+    if chat.admin_id == current_user_id:
+        # Шукаємо іншого учасника для передачі адмінства
+        stmt_others = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id != current_user_id).limit(1)
+        others_res = await db.execute(stmt_others)
+        next_admin = others_res.scalars().first()
+
+        if next_admin:
+            chat.admin_id = next_admin.user_id
+        else:
+            # Адмінів більше немає — видаляємо чат
+            await db.delete(chat)
+            await db.commit()
+            return {"status": "chat_deleted"}
+
+    # 4. Видаляємо поточного користувача
+    await db.delete(member)
+    await db.commit()
+    return {"status": "left"}
 
 
 

@@ -4,6 +4,7 @@ import 'custom_widgets.dart';    // Твої реальні FigmaRatingStar, Fig
 import 'package:auto_size_text/auto_size_text.dart';
 import 'user_session.dart';
 import 'api_service.dart';
+import 'new_chat_room_screen.dart';
 
 // Створюємо enum для зручного керування станами кнопки дружби
 enum FriendStatus {
@@ -1133,22 +1134,55 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
     return Row(
       children: [
         Expanded(
-          child: Container(
-            height: 48,
-            decoration: BoxDecoration(
-              border: Border.all(color: accentColor, width: 1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Start chat',
-                  style: TextStyle(color: accentColor, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 15),
-                ),
-                const SizedBox(width: 10),
-                const FigmaArrowIcon(),
-              ],
+          child: GestureDetector(
+            onTap: () async {
+              // 1. Показуємо лоадер, бо запит може зайняти час
+              showDialog(context: context, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+              try {
+                // 2. Викликаємо АПІ для отримання/створення чату
+                final response = await ApiService.getOrCreateChat(widget.profile.id);
+                final String chatId = response['chat_id'];
+
+                if (mounted) {
+                  Navigator.pop(context); // Ховаємо лоадер
+
+                  // 3. Відкриваємо чат
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ChatRoomScreen(
+                        friendName: widget.profile.nickname,
+                        chatId: chatId,
+                        friendId: widget.profile.id.toString(),
+                        // ДОДАЙ ЦЕЙ ПАРАМЕТР:
+                        onBack: () {
+                          Navigator.pop(context); // Закриває ChatRoomScreen
+                          _fetchStatus();         // Оновлює статус дружби на екрані профілю
+                        },
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Помилка відкриття чату")));
+              }
+            },
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: accentColor, width: 1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Start chat', style: TextStyle(color: accentColor, fontSize: 15)),
+                  const SizedBox(width: 10),
+                  const FigmaArrowIcon(),
+                ],
+              ),
             ),
           ),
         ),

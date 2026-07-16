@@ -17,58 +17,61 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
-  // 1. Ключ для доступу до методів FriendsScreen
-  final GlobalKey<State<FriendsScreen>> _friendsKey = GlobalKey();
+  // Використовуємо звичайні ключі без типізації, щоб уникнути помилок типу
+  final GlobalKey _friendsKey = GlobalKey();
+  final GlobalKey _chatsKey = GlobalKey();
 
-  // 2. Оголошуємо список як late (ініціалізуємо в initState)
   late final List<Widget> _screens;
 
   @override
   void initState() {
     super.initState();
 
-    UserSession.getUserId().then((userId) {
-      if (userId != null) {
-        ChatManager().init(userId.toString());
-      }
-    });
-
-    // 2. Слухаємо зміни
-    ChatManager().onUnreadChanged = () {
-      if(mounted) setState(() {});
-    };
+    _initChatManager();
 
     _screens = [
       const HomeFeedScreen(),
-      FriendsScreen(key: _friendsKey), // Тут ми передаємо наш ключ
-      const ChatsScreen(),
+      FriendsScreen(key: _friendsKey),
+      ChatsScreen(key: _chatsKey),
       const SettingsScreen(),
     ];
-    // Щоразу, коли змінюється кількість непрочитаних, викликаємо setState
-    ChatManager().onUnreadChanged = () {
-      if(mounted) setState(() {});
-    };
   }
 
-  // Метод для зміни табів
+  Future<void> _initChatManager() async {
+    final userId = await UserSession.getUserId();
+    if (userId != null) {
+      ChatManager().init(userId.toString());
+      ChatManager().onUnreadChanged = () {
+        if (mounted) setState(() {});
+      };
+    }
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
     });
 
-    // Якщо користувач натиснув на FriendsScreen (індекс 1)
+    // Оновлення для Друзів
     if (index == 1) {
       final state = _friendsKey.currentState;
-      // Викликаємо метод оновлення, якщо він існує
       if (state != null && state is dynamic) {
         try {
           (state as dynamic).refreshData();
         } catch (e) {
-          debugPrint("Помилка оновлення списку: $e");
+          debugPrint("Помилка оновлення списку друзів: $e");
         }
       }
     }
+
+    // Оновлення для Чатів
+    if (index == 2) {
+      // Викликаємо наш "гачок", який ми зареєстрували в ChatListWidget
+      ChatListWidget.onRefreshRequested?.call();
+      debugPrint("DEBUG: Примусове оновлення списку чатів через onRefreshRequested!");
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {

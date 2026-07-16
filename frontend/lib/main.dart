@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'profile_setup_screen.dart';
 import 'package:flutter/services.dart';
 
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
 
 void main() async {
   // Забезпечуємо ініціалізацію зв'язку з платформою перед викликом SystemChrome
@@ -25,6 +27,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'GameBuddy',
+      navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
         primarySwatch: Colors.green,

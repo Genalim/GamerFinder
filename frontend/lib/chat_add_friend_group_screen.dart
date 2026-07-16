@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'custom_widgets.dart';
 import 'models.dart';
 import 'group_chat_room_screen.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'api_config.dart';
+import 'api_service.dart';
 
 class ChatAddFriendsGroupScreen extends StatefulWidget {
   final VoidCallback onClose;
@@ -21,12 +25,15 @@ class ChatAddFriendsGroupScreen extends StatefulWidget {
 
 class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
   final Set<String> _selectedFriends = {};
+  String _searchQuery = "";
 
+  // Фільтруємо список на основі пошуку
   List<FriendItem> get _filteredFriends {
     return widget.friendsList.where((friend) {
       bool isMe = friend.name == 'ME';
       bool isCurrentPartner = friend.name == widget.currentFriendName;
-      return !isMe && !isCurrentPartner;
+      bool matchesSearch = friend.name.toLowerCase().contains(_searchQuery.toLowerCase());
+      return !isMe && !isCurrentPartner && matchesSearch;
     }).toList();
   }
 
@@ -37,6 +44,7 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F13),
+      resizeToAvoidBottomInset: false, // ВИПРАВЛЕННЯ СКАКАННЯ: вимикаємо нативний Resize
       body: SafeArea(
         child: Column(
           children: [
@@ -46,21 +54,35 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Використовуємо ваш кастомний віджет тут:
-                  SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: FigmaGreenCloseButton(onTap: widget.onClose),
-                  ),
-                  const Text(
-                      "Add Friends",
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)
-                  ),
-                  // Баланс для центрування заголовка
+                  FigmaGreenCloseButton(onTap: widget.onClose),
+                  const Text("Add Friends", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 40),
                 ],
               ),
             ),
+
+            // SEARCH BAR (1 в 1 як у NewMessageScreen)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(10)),
+                child: TextField(
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: const InputDecoration(
+                    prefixIcon: SizedBox(width: 40, child: Center(child: FigmaSearchIcon())),
+                    hintText: 'Search friends...',
+                    hintStyle: TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
+                    border: InputBorder.none,
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ),
+
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -68,20 +90,46 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
                 itemBuilder: (context, index) => _buildFriendTile(displayList[index]),
               ),
             ),
+
             // Кнопка створення групи
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: GestureDetector(
-                onTap: isButtonActive ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => GroupChatRoomScreen(
-                        participantNames: [widget.currentFriendName, ..._selectedFriends],
-                        onBack: () => Navigator.pop(context),
-                      ),
-                    ),
+                onTap: isButtonActive ? () async {
+                  // 1. Отримуємо список ID: фільтруємо список друзів за іменами з _selectedFriends
+                  final List<int> selectedIds = widget.friendsList
+                      .where((f) => _selectedFriends.contains(f.name))
+                      .map((f) => f.id) // <--- Тут "f.id" буде працювати, якщо ти додав id в FriendItem
+                      .toList();
+
+                  // 2. Створюємо групу на бекенді
+                  final response = await http.post(
+                      Uri.parse('${ApiConfig.baseUrl}/chats/create-group'),
+                      headers: await ApiService.getHeaders(),
+                      body: json.encode({
+                        "name": "New Group",
+                        "user_ids": selectedIds, // Передаємо сформований список ID
+                      })
                   );
+
+                  if (response.statusCode == 200) {
+                    final data = json.decode(response.body);
+                    final String newChatId = data['chat_id'];
+
+                    // 3. Переходимо в чат
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GroupChatRoomScreen(
+                          chatId: newChatId,
+                          participantNames: [widget.currentFriendName, ..._selectedFriends],
+                          onBack: () => Navigator.pop(context),
+                        ),
+                      ),
+                    );
+                  } else {
+                    debugPrint("Помилка створення групи: ${response.statusCode}");
+                  }
                 } : null,
                 child: Container(
                   height: 50,

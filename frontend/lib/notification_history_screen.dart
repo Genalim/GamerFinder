@@ -71,9 +71,17 @@ class _HistoryScreenState extends State<HistoryScreen> with NotificationCardsMix
     return buildFigmaCard(
       item,
       onAccept: (item) async {
-        // Логіка прийняття (наприклад, перехід в чат)
-        bool success = await ApiService.acceptGameInvite(item.id);
-        if (success) _fetchHistory();
+        // Ми ігноруємо результат, якщо нам в історії не потрібен chat_id,
+        // АБО міняємо тип змінної на var або dynamic
+        var response = await ApiService.acceptGameInvite(item.id);
+
+        // Якщо метод все ще повертає bool (як було раніше),
+        // переконайся, що в ApiService.dart він виглядає так:
+        // static Future<bool> acceptGameInvite(...)
+
+        if (response != null) {
+          _fetchHistory();
+        }
       },
       onRemove: (id) async {
         // АБО ApiService.deleteNotification(id) для повного видалення

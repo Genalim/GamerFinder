@@ -15,12 +15,7 @@ class ChatManager {
   // Колбек для оновлення UI
   Function(bool)? onStatusChanged;
 
-  IO.Socket get socket {
-    if (_socket == null) {
-      throw Exception("ChatManager не ініціалізовано! Спочатку викличте init()");
-    }
-    return _socket!;
-  }
+  IO.Socket? get socket => _socket;
 
   void init(String userId) {
     if (_socket != null) return;
@@ -63,11 +58,13 @@ class ChatManager {
   }
 
   void joinChat(String chatId) {
-    socket.emit('join_chat', {'chat_id': chatId});
+    // Використовуй ?. для безпечного виклику
+    socket?.emit('join_chat', {'chat_id': chatId});
   }
 
   void sendMessage(String chatId, String senderId, String content, {String? replyTo}) {
-    socket.emit('send_message', {
+    // Використовуй ?.
+    socket?.emit('send_message', {
       'chat_id': chatId,
       'sender_id': senderId,
       'content': content,

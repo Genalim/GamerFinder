@@ -1,4 +1,5 @@
 class FriendItem {
+  final int id;
   final String name;
   final String status;
   final String initial;
@@ -6,6 +7,7 @@ class FriendItem {
   final String? avatarUrl;
 
   FriendItem({
+    required this.id,
     required this.name,
     required this.status,
     required this.initial,

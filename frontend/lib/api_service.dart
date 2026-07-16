@@ -9,6 +9,7 @@ class ApiService {
   // Базові заголовки з токеном
   static Future<Map<String, String>> getHeaders() async {
     final token = await UserSession.getToken(); // Припустимо, у вас є такий метод
+    print("DEBUG: Запит з токеном: ${token?.substring(0, 10)}...");
     return {
       "Content-Type": "application/json",
       "Authorization": "Bearer $token",
@@ -201,16 +202,21 @@ class ApiService {
     return response.statusCode == 200;
   }
 
-  static Future<bool> acceptGameInvite(String inviteId) async {
+  static Future<Map<String, dynamic>?> acceptGameInvite(String inviteId) async {
     final token = UserSession().token;
-    final response = await http.patch( // Використовуємо PATCH, як у вас на бекенді
+    final response = await http.patch(
       Uri.parse('${ApiConfig.baseUrl}/notifications/$inviteId/accept'),
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer $token",
       },
     );
-    return response.statusCode == 200;
+
+    if (response.statusCode == 200) {
+      // Декодуємо тіло відповіді, яке тепер містить chat_id
+      return json.decode(response.body);
+    }
+    return null; // Повертаємо null у разі помилки
   }
 
   static Future<GamerProfile> getUserProfile(String userId) async {
@@ -318,6 +324,30 @@ class ApiService {
       print("Помилка видалення історії: $e");
       return false;
     }
+  }
+
+  static Future<Map<String, dynamic>> getOrCreateChat(int recipientId) async {
+    final token = await UserSession.getToken();
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/chats/get-or-create?recipient_id=$recipientId'),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+    );
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception("Failed to get/create chat");
+    }
+  }
+
+  static Future<bool> markAllAsRead(String chatId) async {
+    final response = await http.patch(
+      Uri.parse('${ApiConfig.baseUrl}/messages/read/$chatId'), // Твій існуючий ендпоінт
+      headers: await getHeaders(),
+    );
+    return response.statusCode == 200;
   }
 
 }

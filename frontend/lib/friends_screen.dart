@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'Home_Feed_screen.dart';
 import 'gamer_profile_screen.dart';
 import 'user_session.dart';
+import 'new_chat_room_screen.dart';
 
 // =============================================================================
 // МОДЕЛЬ ДАНИХ ДЛЯ ЕКРАНУ
@@ -168,6 +169,40 @@ class _FriendsScreenState extends State<FriendsScreen> {
       debugPrint("Помилка заблокованих: $e");
     } finally {
       if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _startChatWithFriend(FriendItem friend) async {
+    // 1. Спінер
+    showDialog(context: context, builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0))));
+
+    try {
+      // 2. Викликаємо АПІ (використовуємо той самий метод, що ми створили для профілю)
+      final response = await ApiService.getOrCreateChat(friend.userId);
+      final String chatId = response['chat_id'];
+
+      if (mounted) {
+        Navigator.pop(context); // Закриваємо спінер
+
+        // 3. Відкриваємо чат
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatRoomScreen(
+              friendName: friend.nickname,
+              chatId: chatId,
+              friendId: friend.userId.toString(),
+              onBack: () {
+                Navigator.pop(context);
+                refreshData(); // Оновлюємо список, якщо щось змінилось
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Помилка відкриття чату")));
     }
   }
 
@@ -698,13 +733,16 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       border: Border.all(color: const Color(0xFF00F5A0), width: 1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('Start chat', style: TextStyle(color: Color(0xFF00F5A0), fontFamily: 'Inter', fontSize: 15, fontWeight: FontWeight.w500)),
-                        SizedBox(width: 10),
-                        FigmaArrowIcon(),
-                      ],
+                    child: GestureDetector(
+                      onTap: () => _startChatWithFriend(friend), // <-- Додай це
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('Start chat', style: TextStyle(color: Color(0xFF00F5A0), fontFamily: 'Inter', fontSize: 15, fontWeight: FontWeight.w500)),
+                          SizedBox(width: 10),
+                          FigmaArrowIcon(),
+                        ],
+                      ),
                     ),
                   ),
                 ),

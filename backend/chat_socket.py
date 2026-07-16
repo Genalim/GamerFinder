@@ -3,8 +3,8 @@ from datetime import datetime
 import uuid
 # Імпортуємо AsyncSessionLocal з твого database.py
 from database import AsyncSessionLocal
-from models import Message
-from sqlalchemy import select
+from models import Message, User, ChatHidden, ChatMember
+from sqlalchemy import select, delete, and_
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
@@ -46,6 +46,16 @@ async def send_message(sid, data):
             created_at=datetime.utcnow()
         )
         db.add(new_msg)
+
+        # --- ЛОГІКА "ОЖИВЛЕННЯ" ЧАТУ ПІСЛЯ ЙОГО ДЕЛІТУ, ЯКЩО ЗНОВ НАПИСАЛИ ---
+        # Видаляємо запис з ChatHidden для ВСІХ учасників цього чату,
+        # щоб чат з'явився у них у списках після отримання повідомлення
+        await db.execute(
+            delete(ChatHidden).where(
+                ChatHidden.chat_id == chat_id
+            )
+        )
+
         await db.commit()
 
     # 4. Тепер sender_nickname точно існує і доступний тут
