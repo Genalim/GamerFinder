@@ -149,6 +149,7 @@ class ChatMember(Base):
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
     user_id = Column(Integer, ForeignKey('users.id')) # МАЄ БУТИ INTEGER!
     role = Column(String, default='member')
+    is_admin = Column(Boolean, default=False, nullable=False)
 
 class Message(Base):
     __tablename__ = 'messages'

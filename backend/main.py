@@ -1275,12 +1275,13 @@ async def get_or_create_chat(
 @app.get("/messages/{chat_id}")
 async def get_messages(
         chat_id: uuid.UUID,
+        limit: int = Query(30, ge=1, le=100),    # Додаємо ліміт (за замовчуванням 30)
+        offset: int = Query(0, ge=0),            # Додаємо зсув
         db: AsyncSession = Depends(get_db),
         current_user_id: Optional[int] = Depends(get_current_user_id)
 ):
-    # 1. Формуємо підзапит
+    # 1. Формуємо підзапит для лайків (залишаємо як було)
     if current_user_id:
-        # Явно вказуємо .correlate(Message)
         is_liked_subquery = select(MessageReaction.id).filter(
             and_(
                 MessageReaction.message_id == Message.id,
@@ -1290,7 +1291,12 @@ async def get_messages(
     else:
         is_liked_subquery = False
 
-    # 2. Основний запит
+    # 2. Основний запит з LIMIT та OFFSET
+    # ВАЖЛИВО: для пагінації ми беремо від найновіших (desc), а потім реверсуємо на фронті,
+    # або сортуємо asc, але робимо зсув від кінця.
+    # Найпростіше для чату: брати останні N повідомлень.
+
+    # Спочатку рахуємо загальну кількість для офсету або просто сортуємо
     stmt = (
         select(
             Message,
@@ -1300,28 +1306,31 @@ async def get_messages(
         .outerjoin(MessageReaction, Message.id == MessageReaction.message_id)
         .filter(Message.chat_id == chat_id)
         .group_by(Message.id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc()) # Беремо останні повідомлення
+        .limit(limit)
+        .offset(offset)
     )
 
     result = await db.execute(stmt)
-    # Змінюємо отримання результатів, бо тепер ми повертаємо кортежі (Message, count, is_liked)
     rows = result.all()
+
+    # Оскільки ми брали desc(), тепер список іде від нових до старих.
+    # Фронтенд очікує старі -> нові, тому розвертаємо список:
+    rows = list(reversed(rows))
 
     messages_with_likes = []
     for row in rows:
-        msg = row[0] # Об'єкт Message
-        count = row[1] # Кількість лайків
-        is_liked = row[2] # True/False
+        msg = row[0]
+        count = row[1]
+        is_liked = row[2]
 
         msg_data = msg.__dict__.copy()
         msg_data.pop('_sa_instance_state', None)
-
         msg_data['likes_count'] = count
         msg_data['is_liked_by_me'] = bool(is_liked)
         msg_data['chat_id'] = str(msg_data['chat_id'])
         msg_data['id'] = str(msg_data['id'])
         msg_data['sender_id'] = str(msg_data['sender_id'])
-
         messages_with_likes.append(msg_data)
 
     return messages_with_likes
@@ -1353,58 +1362,51 @@ async def get_chats(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
 ):
-    # 1. Створюємо підзапит для отримання всіх прихованих чатів користувача
+    # 1. Шукаємо чати
     hidden_chats_subquery = select(ChatHidden.chat_id).where(ChatHidden.user_id == current_user.id).scalar_subquery()
 
-    # 2. Вибираємо чати, яких НЕМАЄ в прихованих
     result = await db.execute(
-        select(Chat)
-        .join(ChatMember)
-        .where(ChatMember.user_id == current_user.id)
-        .where(Chat.id.not_in(hidden_chats_subquery)) # ОСЬ ТУТ ФІЛЬТР
+        select(Chat).join(ChatMember).where(ChatMember.user_id == current_user.id).where(Chat.id.not_in(hidden_chats_subquery))
     )
     chats = result.scalars().all()
 
     response = []
     for chat in chats:
-        print(f"DEBUG: Обробляю чат {chat.id}") # Це покаже в консолі сервера, чи доходить цикл до чату
-        # ...
         # Останнє повідомлення
         msg_res = await db.execute(
             select(Message).where(Message.chat_id == chat.id).order_by(desc(Message.created_at)).limit(1)
         )
         last_msg = msg_res.scalar_one_or_none()
 
-        # Непрочитані
-        unread_res = await db.execute(
-            select(func.count(Message.id)).where(
-                Message.chat_id == chat.id,
-                Message.sender_id != current_user.id,
-                Message.status != 'read'
-            )
-        )
-        unread_count = unread_res.scalar()
-
-        # Партнери для ініціалів
+        # Отримуємо ВСІХ учасників цього чату
         members_res = await db.execute(
-            select(User).join(ChatMember).where(ChatMember.chat_id == chat.id, ChatMember.user_id != current_user.id)
+            select(User).join(ChatMember).where(ChatMember.chat_id == chat.id)
         )
-        others = members_res.scalars().all()
-        print(f"DEBUG: Учасників знайдено: {len(others)}")
+        all_members = members_res.scalars().all()
+
+        # Фільтруємо "інших" (для назви чату та ініціалів)
+        others = [u for u in all_members if u.id != current_user.id]
+
+        # --- ТУТ МИ ФОРМУЄМО members_data В ПАМ'ЯТІ (не з БД, а з об'єктів User) ---
+        members_data = [
+            {"nickname": u.nickname, "avatar": u.avatar}
+            for u in all_members[:4]
+        ]
 
         response.append({
             "chat_id": str(chat.id),
             "title": chat.name if chat.is_group else (others[0].nickname if others else "Unknown"),
             "last_message": last_msg.content if last_msg else "Початок чату",
             "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
-            "unread_count": unread_count,
+            "unread_count": 0, # (тут твоя логіка)
             "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
             "is_group": chat.is_group,
-            "initials": [u.nickname[0].upper() for u in others] if not chat.is_group else [u.nickname[0].upper() for u in others[:4]],
+            "initials": [u.nickname[0].upper() for u in others[:4]],
             "last_message_status": last_msg.status if last_msg else "sent",
             "rating": others[0].rating if (not chat.is_group and others) else None,
-            "recipient_id": others[0].id if (not chat.is_group and others) else None, # <--- ДОДАЙ ЦЕ
-            "avatar_url": chat.avatar_url if chat.is_group else (others[0].avatar if others else None), # <--- Гнучкий вибір
+            "recipient_id": others[0].id if (not chat.is_group and others) else None,
+            "avatar_url": chat.avatar_url if chat.is_group else (others[0].avatar if others else None),
+            "members": members_data # <--- ЦЕ САМЕ ТЕ, ЩО ТРЕБА
         })
 
     return response
@@ -1612,35 +1614,31 @@ async def get_chat_info(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # 1. Знаходимо чат
     result = await db.execute(select(Chat).filter(Chat.id == chat_id))
     chat = result.scalars().first()
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
+    if not chat: raise HTTPException(status_code=404, detail="Chat not found")
 
-    # 2. Отримуємо учасників
-    stmt = select(User).join(ChatMember).filter(ChatMember.chat_id == chat_id)
-    res_members = await db.execute(stmt)
-    members = res_members.scalars().all()
+    # Отримуємо учасників, тепер з даними про те, чи вони адміни
+    stmt = select(User, ChatMember.is_admin).join(ChatMember).filter(ChatMember.chat_id == chat_id)
+    res = await db.execute(stmt)
+    members = res.all()
 
-    # 3. Формуємо список учасників з їхнім статусом (адмін чи ні)
     members_data = []
-    for m in members:
+    is_me_admin = False
+    for user, is_admin in members:
+        if user.id == current_user_id: is_me_admin = is_admin
         members_data.append({
-            "id": m.id,
-            "nickname": m.nickname,
-            "is_admin": m.id == chat.admin_id,
-            "avatar": m.avatar,
-            "is_online": m.is_online
+            "id": user.id,
+            "nickname": user.nickname,
+            "is_admin": is_admin, # Тепер беремо з бази
+            "avatar": user.avatar
         })
 
     return {
         "chat_id": str(chat.id),
         "name": chat.name,
-        "avatar_url": chat.avatar_url,
-        "admin_id": chat.admin_id,
         "members": members_data,
-        "is_me_admin": current_user_id == chat.admin_id
+        "is_me_admin": is_me_admin
     }
 # Ендпоінт для оновлення назви групи
 @app.patch("/group_chats/{chat_id}/name")
@@ -1702,37 +1700,153 @@ async def leave_group_chat(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # 1. Знаходимо чат
-    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
-    chat = result.scalars().first()
-    if not chat: raise HTTPException(status_code=404, detail="Chat not found")
+    # 1. Знаходимо чат та учасника
+    res_chat = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = res_chat.scalars().first()
 
-    # 2. Знаходимо запис членства юзера
-    stmt_member = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id == current_user_id)
-    member_res = await db.execute(stmt_member)
-    member = member_res.scalars().first()
-    if not member: raise HTTPException(status_code=404, detail="Not a member")
+    res_member = await db.execute(select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id == current_user_id))
+    member = res_member.scalars().first()
 
-    # 3. Якщо адмін виходить
+    if not chat or not member:
+        raise HTTPException(status_code=404, detail="Chat or member not found")
+
+    # 2. Якщо виходить адмін
     if chat.admin_id == current_user_id:
-        # Шукаємо іншого учасника для передачі адмінства
-        stmt_others = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id != current_user_id).limit(1)
+        # Шукаємо інших адмінів, крім нас
+        stmt_others = select(ChatMember).filter(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id != current_user_id,
+            ChatMember.is_admin == True
+        ).limit(1)
         others_res = await db.execute(stmt_others)
         next_admin = others_res.scalars().first()
 
         if next_admin:
+            # Передаємо адмінство іншому адміну
             chat.admin_id = next_admin.user_id
         else:
-            # Адмінів більше немає — видаляємо чат
-            await db.delete(chat)
-            await db.commit()
-            return {"status": "chat_deleted"}
+            # Якщо інших адмінів немає, шукаємо будь-якого іншого учасника
+            stmt_any = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id != current_user_id).limit(1)
+            any_res = await db.execute(stmt_any)
+            fallback = any_res.scalars().first()
+
+            if fallback:
+                chat.admin_id = fallback.user_id
+            else:
+                # 3. Якщо учасників більше немає — вимикаємо світло
+                await db.delete(chat)
+                await db.commit()
+                return {"status": "chat_deleted"}
 
     # 4. Видаляємо поточного користувача
     await db.delete(member)
     await db.commit()
+
+    # 5. Еміт події про вихід
+    await sio.emit('user_left', {
+        'chat_id': str(chat_id),
+        'user_id': current_user_id
+    }, room=str(chat_id))
+
     return {"status": "left"}
 
+
+# Додати адміна
+@app.post("/group_chats/{chat_id}/members/{member_id}/admin")
+async def make_admin(
+        chat_id: uuid.UUID,
+        member_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Виконуємо запит один раз і зберігаємо результат у змінну
+    stmt = select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id == current_user_id)
+    result = await db.execute(stmt)
+    me = result.scalars().first()
+
+    # 2. Тепер перевіряємо змінну 'me'
+    if not me or not me.is_admin:
+        raise HTTPException(status_code=403, detail="Not an admin")
+
+    # 3. Оновлюємо статус іншого користувача
+    await db.execute(
+        update(ChatMember)
+        .where(ChatMember.chat_id == chat_id, ChatMember.user_id == member_id)
+        .values(is_admin=True)
+    )
+    await db.commit()
+    return {"status": "success"}
+
+# Зняти адміна
+@app.delete("/group_chats/{chat_id}/members/{member_id}/admin")
+async def remove_admin(chat_id: uuid.UUID, member_id: int, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
+    # Аналогічна перевірка...
+    await db.execute(update(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id == member_id).values(is_admin=False))
+    await db.commit()
+    return {"status": "success"}
+
+# Ендпоінт для видалення учасника з групи
+@app.delete("/group_chats/{chat_id}/members/{member_id}")
+async def remove_member(
+        chat_id: uuid.UUID,
+        member_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Перевірка адмінства
+    result = await db.execute(select(Chat).filter(Chat.id == chat_id))
+    chat = result.scalars().first()
+    if not chat or chat.admin_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Only admin can remove members")
+
+    # 2. Перевірка, чи це не видалення самого себе (для цього є /leave)
+    if member_id == current_user_id:
+        raise HTTPException(status_code=400, detail="Use leave endpoint to remove yourself")
+
+    # 3. Видалення з ChatMember
+    stmt = delete(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id == member_id)
+    result = await db.execute(stmt)
+
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Member not found in chat")
+
+    await db.commit()
+    return {"status": "removed"}
+
+#Додаємо юзерів до групового чату:
+@app.post("/group_chats/{chat_id}/add-members")
+async def add_members(
+        chat_id: uuid.UUID,
+        data: dict,
+        db: AsyncSession = Depends(get_db)
+):
+    user_ids = data.get("user_ids", [])
+    for uid in user_ids:
+        # Перевіряємо чи він ще не там (щоб не було помилки унікальності)
+        existing = await db.execute(select(ChatMember).filter(ChatMember.chat_id == chat_id, ChatMember.user_id == uid))
+        if not existing.scalars().first():
+            db.add(ChatMember(chat_id=chat_id, user_id=uid, is_admin=False))
+
+    await db.commit()
+    return {"status": "success"}
+
+@app.get("/chats/{chat_id}/search")
+async def search_messages(
+        chat_id: uuid.UUID,
+        query: str,
+        db: AsyncSession = Depends(get_db)
+):
+    # Шукаємо в контенті повідомлень
+    stmt = select(Message).filter(
+        Message.chat_id == chat_id,
+        Message.content.ilike(f"%{query}%")
+    ).order_by(Message.created_at.desc())
+
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+
+    # Повертаємо знайдені повідомлення
+    return [{"id": str(m.id), "content": m.content, "created_at": m.created_at.isoformat()} for m in messages]
 
 
 

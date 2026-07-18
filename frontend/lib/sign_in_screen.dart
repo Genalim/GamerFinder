@@ -6,6 +6,7 @@ import 'user_session.dart';
 import 'Main_navigation.dart';
 import 'api_config.dart';
 import 'package:http/http.dart' as http;
+import 'Welcome_screen.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -170,7 +171,22 @@ class _SignInScreenState extends State<SignInScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F1A),
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white), onPressed: () => Navigator.pop(context))),
+      appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+              onPressed: () {
+                // ЗАМІСТЬ Navigator.pop(context), використовуємо pushAndRemoveUntil
+                // Це гарантує, що ми повернемося саме на WelcomeScreen
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+                      (route) => false, // Очищає всю історію перед цим
+                );
+              }
+          )
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),

@@ -11,12 +11,16 @@ class ChatAddFriendsGroupScreen extends StatefulWidget {
   final VoidCallback onClose;
   final String currentFriendName;
   final List<FriendItem> friendsList;
+  final String? chatId; // <-- Додаємо (null, якщо створюємо нову)
+  final List<int>? existingMemberIds;
 
   const ChatAddFriendsGroupScreen({
     super.key,
     required this.onClose,
     required this.currentFriendName,
     required this.friendsList,
+    this.chatId,
+    this.existingMemberIds,
   });
 
   @override
@@ -30,10 +34,19 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
   // Фільтруємо список на основі пошуку
   List<FriendItem> get _filteredFriends {
     return widget.friendsList.where((friend) {
+      // 1. Стара логіка (не показувати "МЕ" і поточного партнера)
       bool isMe = friend.name == 'ME';
       bool isCurrentPartner = friend.name == widget.currentFriendName;
+
+      // 2. НОВА логіка: виключаємо тих, хто вже є в чаті
+      // Перевіряємо, чи є ID цього друга у списку існуючих учасників
+      bool alreadyInGroup = widget.existingMemberIds?.contains(friend.id) ?? false;
+
+      // 3. Пошук
       bool matchesSearch = friend.name.toLowerCase().contains(_searchQuery.toLowerCase());
-      return !isMe && !isCurrentPartner && matchesSearch;
+
+      // Повертаємо true, тільки якщо це не ми, не партнер, не учасник групи І матчить пошук
+      return !isMe && !isCurrentPartner && !alreadyInGroup && matchesSearch;
     }).toList();
   }
 
@@ -91,44 +104,58 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
               ),
             ),
 
-            // Кнопка створення групи
+            // Кнопка створення або додавання
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: GestureDetector(
                 onTap: isButtonActive ? () async {
-                  // 1. Отримуємо список ID: фільтруємо список друзів за іменами з _selectedFriends
                   final List<int> selectedIds = widget.friendsList
                       .where((f) => _selectedFriends.contains(f.name))
-                      .map((f) => f.id) // <--- Тут "f.id" буде працювати, якщо ти додав id в FriendItem
+                      .map((f) => f.id)
                       .toList();
 
-                  // 2. Створюємо групу на бекенді
-                  final response = await http.post(
-                      Uri.parse('${ApiConfig.baseUrl}/chats/create-group'),
-                      headers: await ApiService.getHeaders(),
-                      body: json.encode({
-                        "name": "New Group",
-                        "user_ids": selectedIds, // Передаємо сформований список ID
-                      })
-                  );
-
-                  if (response.statusCode == 200) {
-                    final data = json.decode(response.body);
-                    final String newChatId = data['chat_id'];
-
-                    // 3. Переходимо в чат
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => GroupChatRoomScreen(
-                          chatId: newChatId,
-                          participantNames: [widget.currentFriendName, ..._selectedFriends],
-                          onBack: () => Navigator.pop(context),
-                        ),
-                      ),
+                  if (widget.chatId != null) {
+                    // ВАРІАНТ: Додавання в існуючий чат
+                    final response = await http.post(
+                        Uri.parse('${ApiConfig.baseUrl}/group_chats/${widget.chatId}/add-members'),
+                        headers: await ApiService.getHeaders(),
+                        body: json.encode({"user_ids": selectedIds})
                     );
+
+                    if (response.statusCode == 200) {
+                      // Повертаємо true, щоб оновити дані в батьківському екрані (ChatInfo)
+                      Navigator.pop(context, true);
+                    } else {
+                      debugPrint("Помилка додавання: ${response.statusCode}");
+                    }
                   } else {
-                    debugPrint("Помилка створення групи: ${response.statusCode}");
+                    // ВАРІАНТ: Створення нової групи
+                    final response = await http.post(
+                        Uri.parse('${ApiConfig.baseUrl}/chats/create-group'),
+                        headers: await ApiService.getHeaders(),
+                        body: json.encode({
+                          "name": "New Group",
+                          "user_ids": selectedIds,
+                        })
+                    );
+
+                    if (response.statusCode == 200) {
+                      final data = json.decode(response.body);
+                      final String newChatId = data['chat_id'];
+
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => GroupChatRoomScreen(
+                            chatId: newChatId,
+                            participantNames: [widget.currentFriendName, ..._selectedFriends],
+                            onBack: () => Navigator.pop(context),
+                          ),
+                        ),
+                      );
+                    } else {
+                      debugPrint("Помилка створення групи: ${response.statusCode}");
+                    }
                   }
                 } : null,
                 child: Container(
@@ -138,7 +165,13 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Center(
-                    child: Text("Create Group", style: TextStyle(fontWeight: FontWeight.w700, color: isButtonActive ? const Color(0xFF0F0F1A) : const Color(0xFF6B6B80))),
+                    child: Text(
+                        widget.chatId != null ? "Add Members" : "Create Group",
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: isButtonActive ? const Color(0xFF0F0F1A) : const Color(0xFF6B6B80)
+                        )
+                    ),
                   ),
                 ),
               ),

@@ -26,6 +26,8 @@ class ChatItem {
   final String status;
   final double? rating;
   final String? avatarUrl;
+  final bool isOnline;
+  final List<dynamic> members;
 
   ChatItem({
     required this.id,
@@ -40,10 +42,17 @@ class ChatItem {
     required this.status,
     this.rating,
     this.avatarUrl,
+    this.isOnline = false,
+    required this.members,
+
   });
 
   // --- ОСЬ СЮДИ ВСТАВЛЯЄМО ФАБРИКУ ---
   factory ChatItem.fromJson(Map<String, dynamic> json) {
+    bool onlineStatus = false;
+    if (json.containsKey('is_online') && json['is_online'] != null) {
+      onlineStatus = json['is_online'] == true;
+    }
     debugPrint("DEBUG: Вхідний JSON: $json");
     return ChatItem(
       id: json['chat_id']?.toString() ?? json['id']?.toString() ?? '',
@@ -58,6 +67,8 @@ class ChatItem {
       rating: json['rating']?.toDouble(),
       avatarUrl: json['avatar_url'],
       recipientId: json['recipient_id'],
+      isOnline: onlineStatus,
+      members: (json['members'] is List) ? List<Map<String, dynamic>>.from(json['members']) : [],
     );
   }
 }
@@ -342,20 +353,31 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
   }
 
   Widget _buildChatAvatar(ChatItem chat) {
-    // 1. Якщо у чату є власна аватарка (кейс "в" - групова аватарка чату)
+    // 1. Визначаємо колір рамки для СИНГЛ чатів
+    final borderColor = chat.isOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9);
+
+    Widget avatarWidget;
     if (chat.avatarUrl != null && chat.avatarUrl!.isNotEmpty) {
-      // Тут ми викликаємо buildAvatar, який у тебе вже є нижче
-      return ClipOval(child: buildAvatar(chat.avatarUrl!, '?', 40));
+      avatarWidget = ClipOval(child: buildAvatar(chat.avatarUrl!, '?', 40));
+    } else if (!chat.isGroupChat) {
+      avatarWidget = _buildSingleAvatar(chat.userInitials.isNotEmpty ? chat.userInitials.first : '?');
+    } else {
+      avatarWidget = _buildGroupAvatar(chat.members);
     }
 
-    // 2. Якщо це чат 1 на 1
+    // 2. ЗАСТОСОВУЄМО РАМКУ ТІЛЬКИ ДЛЯ СИНГЛ ЧАТІВ
     if (!chat.isGroupChat) {
-      final initial = chat.userInitials.isNotEmpty ? chat.userInitials.first : '?';
-      return _buildSingleAvatar(initial);
+      return Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: borderColor, width: 1.0),
+        ),
+        child: avatarWidget,
+      );
     }
 
-    // 3. Якщо група
-    return _buildGroupAvatar(chat.userInitials);
+    // 3. ЯКЩО ГРУПА - повертаємо без контейнера з рамкою
+    return avatarWidget;
   }
 
   Widget _buildChatTile(ChatItem chat) {
@@ -483,27 +505,43 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
 
   Widget _buildSingleAvatar(String initial) {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF181826), shape: BoxShape.circle, boxShadow: [BoxShadow(color: const Color(0xFF00F5A0).withOpacity(0.3), blurRadius: 6)]),
-      child: Center(child: Text(initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 25, color: Color(0xFF00F5A0)))),
+      width: 34, height: 34, // Зменшили до 34
+      decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
+      child: Center(
+          child: Text(initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 18, color: Color(0xFF00F5A0)))
+      ),
     );
   }
 
-  Widget _buildGroupAvatar(List<String> initials) {
-    // Кейс 3 і 4: беремо максимум 4
-    final displayInitials = initials.take(4).toList();
+  Widget _buildGroupAvatar(List<dynamic> members) {
+    final displayMembers = members.take(4).toList();
 
-    return Container(
-      width: 40, height: 40,
-      decoration: const BoxDecoration(color: Color(0xFF181826), shape: BoxShape.circle),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        runAlignment: WrapAlignment.center,
-        spacing: 2, runSpacing: 2,
-        children: displayInitials.map((i) => Text(
-            i,
-            style: const TextStyle(fontFamily: 'Love Light', fontSize: 10, color: Color(0xFF00F5A0))
-        )).toList(),
-      ),
+    return Wrap(
+      alignment: WrapAlignment.center,
+      runAlignment: WrapAlignment.center,
+      spacing: 2,
+      runSpacing: 2,
+      children: displayMembers.map((m) {
+        // БЕЗПЕЧНЕ ПРИВЕДЕННЯ: перетворюємо dynamic на Map
+        final memberMap = m as Map<String, dynamic>;
+
+        final String initial = (memberMap['nickname']?.isNotEmpty ?? false)
+            ? memberMap['nickname'][0].toUpperCase()
+            : '?';
+        final String? avatar = memberMap['avatar'];
+
+        return Container(
+          width: displayMembers.length == 1 ? 36 : 17,
+          height: displayMembers.length == 1 ? 36 : 17,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF00F5A0), width: 0.8),
+          ),
+          child: ClipOval(
+            child: buildAvatar(avatar, initial, 36),
+          ),
+        );
+      }).toList(),
     );
   }
 

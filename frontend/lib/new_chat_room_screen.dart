@@ -54,6 +54,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   // Додаємо змінну для реального ID чату
   String? _activeChatId;
 
+  int _currentOffset = 0;
+  bool _isLoadingMore = false;
+  bool _hasMoreMessages = true;
+
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, int>> _foundMatches = [];
+  int _currentFoundIndex = -1;
+
   void _markMessagesAsReadUi(String chatId) {
     if (!mounted) return;
 
@@ -192,27 +201,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   // Окремий метод для завантаження історії
-  Future<void> _loadHistory(String chatId) async {
+  Future<void> _loadHistory(String chatId, {bool isLoadMore = false}) async {
+    if (_isLoadingMore || (!_hasMoreMessages && isLoadMore)) return;
+
+    setState(() => _isLoadingMore = true);
+
     try {
-      // ВАЖЛИВО: додаємо headers, як ти робиш у методі _markAsReadOnServer
+      // Додаємо limit та offset до запиту
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/messages/$chatId'),
-        headers: await ApiService.getHeaders(), // <-- ДОДАЙ ЦЕ
+        Uri.parse('${ApiConfig.baseUrl}/messages/$chatId?limit=30&offset=$_currentOffset'),
+        headers: await ApiService.getHeaders(),
       );
 
       if (response.statusCode == 200) {
         final List<dynamic> list = json.decode(response.body);
-        // ... далі твій код обробки повідомлень ...
-        final String myId = UserSession().currentUser?.id.toString() ?? "";
-        final String myNickname = UserSession().currentUser?.nickname ?? "You";
 
-        setState(() {
-          _messages = list.map((item) => {
+        if (list.isEmpty) {
+          setState(() => _hasMoreMessages = false);
+        } else {
+          final String myId = UserSession().currentUser?.id.toString() ?? "";
+          final String myNickname = UserSession().currentUser?.nickname ?? "You";
+
+          final newMessages = list.map((item) => {
             'id': item['id'].toString(),
             'content': item['content'],
             'sender_id': item['sender_id'].toString(),
-            'sender_nickname': item['sender_nickname'] ??
-            (item['sender_id'].toString() == myId ? myNickname : widget.friendName),
+            'sender_nickname': item['sender_nickname'] ?? (item['sender_id'].toString() == myId ? myNickname : widget.friendName),
             'isMe': item['sender_id'].toString() == myId,
             'time': _parseDateTime(item['created_at']),
             'status': item['status'] ?? 'sent',
@@ -221,14 +235,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
             'is_liked_by_me': item['is_liked_by_me'] ?? false,
           }).toList();
 
-          _messages.sort((a, b) => a['time'].compareTo(b['time']));
-        });
-        _handleInitialScroll();
-      } else {
-        debugPrint("Помилка завантаження: ${response.statusCode} - ${response.body}");
+          setState(() {
+            if (isLoadMore) {
+              _messages = [...newMessages, ..._messages];
+            } else {
+              _messages = newMessages;
+            }
+            _messages.sort((a, b) => a['time'].compareTo(b['time']));
+            _currentOffset += list.length;
+          });
+
+          if (!isLoadMore) _handleInitialScroll();
+        }
       }
     } catch (e) {
       debugPrint("Помилка завантаження історії: $e");
+    } finally {
+      setState(() => _isLoadingMore = false);
     }
   }
 
@@ -317,12 +340,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    // Даємо маленький час системі на зміну розміру вікна
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      }
-    });
+
+    // Додаємо прапорець, щоб ігнорувати скрол під час анімації закриття/відкриття профілю
+    // Якщо ти хочеш скролити тільки коли ти реально пишеш текст:
+    if (_focusNode.hasFocus) {
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   void _showActionsOverlay(BuildContext context, Map<String, dynamic> message, Offset tapPosition) async {
@@ -538,6 +569,36 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     }
   }
 
+  void _performSearch(String query) {
+    if (query.isEmpty) {
+      setState(() { _foundMatches = []; _currentFoundIndex = -1; });
+      return;
+    }
+    setState(() {
+      _foundMatches = [];
+      String q = query.toLowerCase();
+      for (int i = 0; i < _messages.length; i++) {
+        String content = getCleanContent(_messages[i]['content']).toLowerCase();
+        int index = content.indexOf(q);
+        while (index != -1) {
+          _foundMatches.add({'messageIndex': i, 'matchIndex': index});
+          index = content.indexOf(q, index + 1);
+        }
+      }
+      _currentFoundIndex = _foundMatches.isNotEmpty ? _foundMatches.length - 1 : -1;
+      _scrollToFoundMessage();
+    });
+  }
+
+  void _scrollToFoundMessage() {
+    if (_foundMatches.isEmpty || _currentFoundIndex == -1) return;
+    int msgIndex = _foundMatches[_currentFoundIndex]['messageIndex']!;
+    final key = _messageKeys[msgIndex];
+    if (key != null && key.currentContext != null) {
+      Scrollable.ensureVisible(key.currentContext!, duration: const Duration(milliseconds: 300), alignment: 0.5);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final String initial = widget.friendName.isNotEmpty ? widget.friendName[0].toUpperCase() : '?';
@@ -568,39 +629,55 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                 Expanded(
                   child: Stack(
                     children: [
-                      ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.only(bottom: 20),
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          final msg = _messages[index];
-                          final bool isNewDay = index == 0 || !isSameDay(msg['time'], _messages[index - 1]['time']);
-                          final status = MessageStatus.values.firstWhere(
-                                (e) => e.name == (msg['status'] ?? 'sent'),
-                            orElse: () => MessageStatus.sent,
-                          );
-
-                          return ChatMessageWidget(
-                            key: ValueKey(msg['id']),
-                            showDateDivider: isNewDay,
-                            // Передаємо нові параметри як аргументи віджета:
-                            likesCount: msg['likes_count'] ?? 0,
-                            isLikedByMe: msg['is_liked_by_me'] ?? false,
-                            message: ChatMessage(
-                              id: msg['id'].toString(),
-                              content: msg['content']?.toString() ?? "", // Тільки один раз тут!
-                              senderId: msg['sender_id']?.toString() ?? "0",
-                              senderName: msg['sender_nickname'] ?? "User",
-                              timestamp: msg['time'] is DateTime ? msg['time'] : DateTime.now(),
-                              isMe: msg['isMe'] ?? false,
-                              status: status,
-                              replyToId: msg['reply_to_id']?.toString(),
-                              // likesCount та isLikedByMe прибираємо звідси, бо ми їх передали у віджет вище
-                            ),
-                            allMessages: _messages,
-                            onActionSelected: (action) => _handleMessageAction(action, msg),
-                          );
+                      // ДОДАНО: NotificationListener для пагінації
+                      NotificationListener<ScrollNotification>(
+                        onNotification: (ScrollNotification scrollInfo) {
+                          if (scrollInfo.metrics.pixels == scrollInfo.metrics.minScrollExtent &&
+                              !_isLoadingMore &&
+                              _hasMoreMessages &&
+                              _activeChatId != null) {
+                            _loadHistory(_activeChatId!, isLoadMore: true);
+                            return true;
+                          }
+                          return false;
                         },
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.only(bottom: 20),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) { // <--- тут вже є "index"
+                            final msg = _messages[index];
+                            final bool isNewDay = index == 0 || !isSameDay(msg['time'], _messages[index - 1]['time']);
+                            final status = MessageStatus.values.firstWhere(
+                                  (e) => e.name == (msg['status'] ?? 'sent'),
+                              orElse: () => MessageStatus.sent,
+                            );
+
+                            return ChatMessageWidget(
+                              key: ValueKey(msg['id']),
+                              searchQuery: _searchController.text,
+                              currentMatchIndex: _currentFoundIndex,
+                              messageIndex: index, // <--- передаємо index сюди
+                              foundMatches: _foundMatches,
+                              isHighlighted: _isSearching && _foundMatches.any((m) => m['messageIndex'] == index),
+                              showDateDivider: isNewDay,
+                              likesCount: msg['likes_count'] ?? 0,
+                              isLikedByMe: msg['is_liked_by_me'] ?? false,
+                              message: ChatMessage(
+                                id: msg['id'].toString(),
+                                content: msg['content']?.toString() ?? "",
+                                senderId: msg['sender_id']?.toString() ?? "0",
+                                senderName: msg['sender_nickname'] ?? "User",
+                                timestamp: msg['time'] is DateTime ? msg['time'] : DateTime.now(),
+                                isMe: msg['isMe'] ?? false,
+                                status: status,
+                                replyToId: msg['reply_to_id']?.toString(),
+                              ),
+                              allMessages: _messages,
+                              onActionSelected: (action) => _handleMessageAction(action, msg),
+                            );
+                          },
+                        ),
                       ),
                       if (_showScrollDownButton)
                         Positioned(
@@ -637,66 +714,119 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   Widget _buildHeader(String initial) {
+    // --- БЛОК 4: РЕЖИМ ПОШУКУ ---
+    if (_isSearching) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 57, 12, 0),
+        child: Container(
+          height: 45,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF181826),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2B2B3B)),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 20, height: 20, child: FittedBox(child: FigmaSearchIcon())),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(hintText: "Search...", hintStyle: TextStyle(color: Color(0xFF8E8EA9)), border: InputBorder.none),
+                  onChanged: _performSearch,
+                ),
+              ),
+              if (_foundMatches.isNotEmpty) ...[
+                Text("${_currentFoundIndex + 1}/${_foundMatches.length}", style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 12)),
+                GestureDetector(onTap: () { setState(() => _currentFoundIndex = (_currentFoundIndex + 1) % _foundMatches.length); _scrollToFoundMessage(); }, child: const Icon(Icons.keyboard_arrow_down, color: Colors.white)),
+                GestureDetector(onTap: () { setState(() => _currentFoundIndex = (_currentFoundIndex - 1 + _foundMatches.length) % _foundMatches.length); _scrollToFoundMessage(); }, child: const Icon(Icons.keyboard_arrow_up, color: Colors.white)),
+              ],
+              GestureDetector(
+                onTap: () => setState(() {
+                  _isSearching = false;
+                  _searchController.clear();
+                  _foundMatches = [];
+                  _currentFoundIndex = -1;
+                }),
+                child: ColorFiltered(
+                  colorFilter: const ColorFilter.mode(Color(0xFF00F5A0), BlendMode.srcIn),
+                  child: FigmaCloseButton(
+                    // Передаємо onTap сюди, щоб помилка зникла:
+                    onTap: () => setState(() {
+                      _isSearching = false;
+                      _searchController.clear();
+                      _foundMatches = [];
+                      _currentFoundIndex = -1;
+                    }),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // --- ЗВИЧАЙНИЙ РЕЖИМ ---
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 57, 12, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          GestureDetector(
-            onTap: () {
-              // ДОДАЙ ЦЕЙ РЯДОК:
-              ChatListWidget.onRefreshRequested?.call();
-
-              // А потім вже виконуй дію "назад"
-              widget.onBack();
-            },
-            child: const SizedBox(width: 40, height: 40, child: ChatBackIcon(size: 24)),
-          ),
+          GestureDetector(onTap: widget.onBack, child: const SizedBox(width: 40, height: 40, child: ChatBackIcon(size: 24))),
           Row(
             children: [
               GestureDetector(
-                onTap: () {
-                  print("DEBUG: Клік на аватарку, friendId = ${widget.friendId}");
+                onTap: () async {
+                  // 1. Примусово ховаємо клавіатуру перед відкриттям профілю
+                  FocusScope.of(context).unfocus();
+
                   if (widget.friendId != null) {
-                    GamerProfileScreen.openFromId(context, widget.friendId!);
+                    // 2. Очікуємо закриття екрана профілю
+                    await GamerProfileScreen.openFromId(context, widget.friendId!);
+
+                    // 3. Після повернення (незалежно від того, що там було)
+                    // гарантуємо, що фокус не повернувся на TextField
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      if (mounted) {
+                        FocusScope.of(context).unfocus();
+                      }
+                    });
                   }
                 },
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF181826),
-                    shape: BoxShape.circle,
-                  ),
-                  child: ClipOval( // ClipOval краще підходить для круглої аватарки
-                    child: buildAvatar(_friendAvatarUrl, initial, 32),
-                  ),
+                child: ClipOval(
+                  child: buildAvatar(_friendAvatarUrl, initial, 32),
                 ),
               ),
               const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.friendName, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  Text(
-                    _isTyping
-                        ? "typing..."
-                        : (_isConnected ? "online" : "connecting..."),
-                    style: TextStyle(
-                        color: _isTyping ? Colors.white : (_isConnected ? const Color(0xFF00F5A0) : Colors.orange),
-                        fontSize: 10
-                    ),
-                  ),
-                ],
-              ),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(widget.friendName, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                Text(_isTyping ? "typing..." : (_isConnected ? "online" : "connecting..."),
+                    style: TextStyle(color: _isTyping ? Colors.white : (_isConnected ? const Color(0xFF00F5A0) : Colors.orange), fontSize: 10)),
+              ]),
             ],
           ),
-          GestureDetector(
-            onTap: () {
-              // Викликаємо метод, який спочатку вантажить друзів, а потім відкриває екран
-              _fetchFriendsAndOpenGroupScreen();
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white, size: 28),
+            color: const Color(0xFF181826),
+            onSelected: (value) {
+              if (value == 'Add Friends') {
+                _fetchFriendsAndOpenGroupScreen();
+              } else if (value == 'Search') {
+                setState(() => _isSearching = true);
+                // --- БЛОК 6: Focus для пошуку ---
+                Future.delayed(const Duration(milliseconds: 200), () {
+                  if (mounted) FocusScope.of(context).requestFocus(_focusNode);
+                });
+              }
             },
-            child: const ChatAddGroupIcon(size: 42),
+            itemBuilder: (BuildContext context) => [
+              const PopupMenuItem(value: 'Add Friends', child: Text("Add Friends", style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'Search', child: Text("Search", style: TextStyle(color: Colors.white))),
+            ],
           ),
         ],
       ),
@@ -1041,6 +1171,11 @@ class ChatMessageWidget extends StatefulWidget {
   final Function(String) onActionSelected;
   final bool showDateDivider;
   final List<Map<String, dynamic>> allMessages;
+  final bool isHighlighted;
+  final String searchQuery;
+  final int currentMatchIndex;
+  final int messageIndex;
+  final List<Map<String, int>> foundMatches;
 
 
   const ChatMessageWidget({
@@ -1051,6 +1186,11 @@ class ChatMessageWidget extends StatefulWidget {
     required this.onActionSelected,
     required this.allMessages,
     this.showDateDivider = false,
+    this.isHighlighted = false,
+    required this.searchQuery,
+    required this.currentMatchIndex,
+    required this.messageIndex,
+    required this.foundMatches,
 
   });
 
@@ -1088,6 +1228,9 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
               child: Container(
                 key: _messageKey,
                 margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+                decoration: widget.isHighlighted
+                    ? BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(14))
+                    : null,
                 child: CompositedTransformTarget(
                   link: _layerLink,
                   child: GestureDetector(
@@ -1213,12 +1356,12 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             children: [
               replyBlock, // Доданий блок відповіді
               forwardBlock,
-              Text(
-                getCleanContent(widget.message.content), // Викликаємо глобальну функцію
-                style: TextStyle(
-                  color: widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white,
-                  fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter',
-                ),
+              _buildHighlightedText(
+                widget.message.content,
+                widget.searchQuery,
+                widget.currentMatchIndex,
+                widget.messageIndex,
+                widget.foundMatches,
               ),
             ],
           ),
@@ -1371,6 +1514,57 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHighlightedText(String text, String query, int currentMatchIndex, int messageIndex, List<Map<String, int>> foundMatches) {
+    // Визначаємо колір: для твоїх повідомлень (зелений фон) - чорний текст, для інших - білий
+    final Color baseTextColor = widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white;
+
+    if (query.isEmpty) {
+      return Text(
+        getCleanContent(text),
+        style: TextStyle(color: baseTextColor, fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+      );
+    }
+
+    final List<TextSpan> spans = [];
+    final String cleanText = getCleanContent(text);
+    final regExp = RegExp(RegExp.escape(query), caseSensitive: false);
+    int start = 0;
+
+    regExp.allMatches(cleanText).forEach((match) {
+      // Текст ДО знайденої літери
+      spans.add(TextSpan(text: cleanText.substring(start, match.start), style: TextStyle(color: baseTextColor)));
+
+      // Перевіряємо, чи це активний збіг (на який ти натиснув стрілками)
+      bool isActive = false;
+      for(int i = 0; i < foundMatches.length; i++) {
+        if (foundMatches[i]['messageIndex'] == messageIndex && foundMatches[i]['matchIndex'] == match.start) {
+          if (i == currentMatchIndex) isActive = true;
+        }
+      }
+
+      // Текст САМОЇ ЗНАЙДЕНОЇ ЛІТЕРИ
+      spans.add(TextSpan(
+        text: cleanText.substring(match.start, match.end),
+        style: TextStyle(
+          backgroundColor: isActive ? Colors.blue : const Color(0xFFD2691E), // Синій (активний) або Коричневий
+          color: Colors.white, // Літера завжди біла, щоб контрастувала на фоні
+          fontWeight: FontWeight.bold,
+        ),
+      ));
+      start = match.end;
+    });
+
+    // Текст ПІСЛЯ знайденої літери
+    spans.add(TextSpan(text: cleanText.substring(start), style: TextStyle(color: baseTextColor)));
+
+    return RichText(
+      text: TextSpan(
+        children: spans,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
       ),
     );
   }

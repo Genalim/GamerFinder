@@ -10,6 +10,10 @@ import 'package:image_cropper/image_cropper.dart';
 import 'gamer_profile_screen.dart';
 import 'user_session.dart';
 import 'dart:ui';
+import 'chat_add_friend_group_screen.dart';
+import 'models.dart';
+import 'services/chat_manager.dart';
+import 'group_chat_room_screen.dart';
 
 class ChatGroupInfoScreen extends StatefulWidget {
   final String chatId;
@@ -33,6 +37,8 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
   String _dialogTitle = "";
   VoidCallback? _onConfirmDialog;
 
+  List<FriendItem> _myFriends = [];
+
 
 
   bool isAdminMe(int memberId) {
@@ -43,10 +49,46 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
   @override
   void initState() {
     super.initState();
+    _loadFriends();
     _currentBg = _backgrounds[Random().nextInt(_backgrounds.length)];
     _fetchGroupInfo().then((_) {
       _nameController.text = _groupData?['name'] ?? "Group";
     });
+
+    // Підписка через ChatManager
+    ChatManager().socket?.on('user_left', _handleUserLeft);
+  }
+
+  void _handleUserLeft(dynamic data) {
+    if (data['chat_id'] == widget.chatId) {
+      debugPrint("DEBUG: Користувач вийшов, оновлюю список...");
+      _fetchGroupInfo();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Відписка через ChatManager
+    ChatManager().socket?.off('user_left', _handleUserLeft);
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFriends() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/friends/list'),
+        headers: await ApiService.getHeaders(),
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        setState(() {
+          _myFriends = data.map((f) => FriendItem.fromJson(f)).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка завантаження друзів: $e");
+    }
   }
 
   Future<void> _fetchGroupInfo() async {
@@ -93,30 +135,27 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
           body: Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0))));
     }
 
-    return GestureDetector(
-      onTap: () {
-        FocusScope.of(context).unfocus();
-        if (_isEditingName) setState(() => _isEditingName = false);
-      },
-      // Змінюємо підхід: ніякого Scaffold на самому верху.
-      // Використовуємо Stack як основу.
-      child: Stack(
-        children: [
-          // 1. ФОН - завжди фіксований на весь розмір екрана
-          Container(
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/ChatBackground/$_currentBg'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          Container(color: const Color(0xFF0F0F13).withOpacity(0.7)),
+    // Фон тепер існує ВЗАГАЛІ без прив'язки до Scaffold
+    return Stack(
+      children: [
+        // 1. ФОН (малюєтся один раз і не знає про існування клавіатури)
+        Image.asset(
+          'assets/ChatBackground/$_currentBg',
+          fit: BoxFit.cover,
+          width: MediaQuery.of(context).size.width,
+          height: MediaQuery.of(context).size.height,
+        ),
+        Container(color: const Color(0xFF0F0F13).withOpacity(0.7)),
 
-          // 2. SCUFFOLD - тепер він просто поверх фону, прозорий
-          Scaffold(
+        // 2. SCUFFOLD (тепер це лише "прозора плівка" з контентом)
+        GestureDetector(
+          onTap: () {
+            FocusScope.of(context).unfocus();
+            if (_isEditingName) setState(() => _isEditingName = false);
+          },
+          child: Scaffold(
             backgroundColor: Colors.transparent,
-            resizeToAvoidBottomInset: false, // Тепер він не повинен рухати фон
+            resizeToAvoidBottomInset: false,
             body: SafeArea(
               child: Column(
                 children: [
@@ -129,20 +168,20 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
               ),
             ),
           ),
+        ),
 
-          // 3. ДІАЛОГ
-          if (_isDialogVisible)
-            Positioned.fill(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  color: Colors.black.withOpacity(0.2),
-                  child: Center(child: _buildCustomDialog()),
-                ),
+        // 3. ДІАЛОГ
+        if (_isDialogVisible)
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                color: Colors.black.withOpacity(0.2),
+                child: Center(child: _buildCustomDialog()),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
@@ -228,7 +267,7 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
             itemCount: members.length,
             itemBuilder: (context, index) {
               final member = members[index];
-              final bool isAdmin = member['id'] == adminId;
+              final bool isAdmin = member['is_admin'] == true;
               final String initial = (member['nickname']?.isNotEmpty ?? false)
                   ? member['nickname'][0].toUpperCase() : '?';
 
@@ -333,33 +372,47 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
 
   Widget buildAvatar(String? avatarUrl, String initial, double size) {
     if (avatarUrl == null || avatarUrl.isEmpty) {
-      return _buildLetterAvatar(initial);
+      return _buildLetterAvatar(initial, size); // Тепер 2 аргументи!
     }
+
     if (avatarUrl.startsWith('http')) {
       return Image.network(
-        avatarUrl, width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
+        avatarUrl,
+        width: size, height: size,
+        fit: BoxFit.cover, // <--- Це змушує картинку заповнити весь контейнер
+        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
       );
     }
+
     return Image.asset(
-      avatarUrl, width: size, height: size, fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
+      avatarUrl,
+      width: size, height: size,
+      fit: BoxFit.cover, // <--- Це змушує картинку заповнити весь контейнер
+      errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
     );
   }
 
-  Widget _buildLetterAvatar(String initial) {
+  Widget _buildLetterAvatar(String initial, double size) {
     return Container(
-      width: 24, height: 24,
+      width: size,
+      height: size,
       decoration: const BoxDecoration(color: Color(0xFF0F0F13), shape: BoxShape.circle),
       child: Center(
-        child: Text(initial, style: const TextStyle(fontFamily: 'Love Light', fontSize: 14, color: Color(0xFF00F5A0))),
+        child: Text(
+            initial,
+            style: TextStyle(
+                fontFamily: 'Love Light',
+                fontSize: size * 0.7, // <--- Тут головний секрет: шрифт стає пропорційним розміру!
+                color: const Color(0xFF00F5A0)
+            )
+        ),
       ),
     );
   }
 
   Widget _buildGroupAvatar() {
     final members = _groupData!['members'] as List<dynamic>;
-    final bool isMeAdmin = _groupData!['is_me_admin'];
+    final bool isMeAdmin = _groupData!['is_me_admin'] == true;
     final String? avatarUrl = _groupData!['avatar_url'];
 
     return GestureDetector(
@@ -457,10 +510,30 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
               color: _isMuted ? const Color(0xFF8E8EA9) : const Color(0xFF00F5A0),
             ),
           ),
-          _buildActionIconWidget(const FigmaSearchIcon(), "Search", size: 45),
           GestureDetector(
             onTap: () {
-              // Логіка додавання друзів
+              // Navigator.pop повертає результат 'open_search'
+              Navigator.pop(context, 'open_search');
+            },
+            child: _buildActionIconWidget(const FigmaSearchIcon(), "Search", size: 45),
+          ),
+          GestureDetector(
+            onTap: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatAddFriendsGroupScreen(
+                    onClose: () => Navigator.pop(context),
+                    currentFriendName: UserSession().currentUser?.nickname ?? "ME",
+                    friendsList: _myFriends, // <-- Тепер тут є дані!
+                    chatId: widget.chatId,
+                    existingMemberIds: (_groupData!['members'] as List)
+                        .map((m) => m['id'] as int)
+                        .toList(),
+                  ),
+                ),
+              );
+              if (result == true) _fetchGroupInfo();
             },
             child: _buildActionIconWidget(const ChatAddGroupIcon(), "Add friends", size: 45),
           ),
@@ -644,8 +717,19 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
 
 
   Future<void> _handleAction(int memberId, String action) async {
-    // Тут виклик API: /group_chats/${widget.chatId}/members/$memberId/$action
-    // Після успіху викликай _fetchGroupInfo();
+    final headers = await ApiService.getHeaders();
+    String url = '${ApiConfig.baseUrl}/group_chats/${widget.chatId}/members/$memberId';
+
+    try {
+      if (action == 'make_admin') {
+        await http.post(Uri.parse('$url/admin'), headers: headers);
+      } else if (action == 'remove_admin') {
+        await http.delete(Uri.parse('$url/admin'), headers: headers);
+      } else if (action == 'delete') {
+        await http.delete(Uri.parse(url), headers: headers);
+      }
+      _fetchGroupInfo(); // Оновлюємо інтерфейс
+    } catch (e) { debugPrint("Помилка: $e"); }
   }
 
   Widget _buildCustomDialog() {
