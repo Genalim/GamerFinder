@@ -12,6 +12,7 @@ import 'edit_game_selection_screen.dart';
 import 'package:flutter/gestures.dart';
 import 'api_service.dart';
 import 'new_chat_room_screen.dart';
+import 'services/chat_manager.dart';
 
 
 class GamerProfile {
@@ -367,6 +368,29 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     _syncService.startSync(() {
       if (mounted) _fetchNotifications();
     });
+
+    ChatManager().socket?.on('new_notification', (data) {
+      debugPrint("DEBUG: Прийшла нова нотифікація через сокет: $data");
+      if (mounted) {
+        // Можна або викликати _fetchNotifications(),
+        // або просто додати нову нотифікацію в список:
+        _handleNewNotification(data);
+      }
+    });
+  }
+
+  void _handleNewNotification(dynamic data) {
+    final newNotif = NotificationModel.fromJson(data);
+
+    // Перевіряємо, чи немає вже нотифікації з таким ID
+    bool exists = _notifications.any((n) => n.id == newNotif.id);
+
+    if (!exists) {
+      setState(() {
+        _notifications.insert(0, newNotif);
+        _hasUnreadNotifications = true;
+      });
+    }
   }
 
 
@@ -1697,7 +1721,7 @@ class SyncService {
 
   void startSync(Function onSync) {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _timer = Timer.periodic(const Duration(seconds: 90), (timer) {
       onSync();
     });
   }

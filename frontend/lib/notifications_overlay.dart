@@ -20,6 +20,7 @@ class NotificationModel {
   final bool isSenderOnline;
   final bool isSenderPro;
   final double senderRating;
+  final String recipientId;
 
   NotificationModel({
     required this.id,
@@ -33,6 +34,7 @@ class NotificationModel {
     required this.isSenderOnline,
     required this.isSenderPro,
     required this.senderRating,
+    required this.recipientId,
   }) : state = state ?? NotificationState.pending;
 
   int currentRating = 0;
@@ -62,6 +64,7 @@ class NotificationModel {
       isSenderOnline: json['is_sender_online'] ?? false,
       isSenderPro: json['is_sender_pro'] ?? false,
       senderRating: (json['sender_rating'] as num?)?.toDouble() ?? 0.0,
+      recipientId: (json['recipient_id'] ?? '0').toString(),
     );
   }
 
@@ -171,6 +174,7 @@ class _NotificationsOverlayState extends State<NotificationsOverlay> with Notifi
                   itemBuilder: (context, index) {
                     return buildFigmaCard(
                       filtered[index],
+                      context: context,
                       onAccept: widget.onAccept,
                       onRemove: (String id) async {
                         final item = widget.notifications.firstWhere((n) => n.id == id);

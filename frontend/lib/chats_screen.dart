@@ -198,6 +198,9 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
         }
 
         final List<ChatItem> newChats = data.map((json) => ChatItem.fromJson(json)).toList();
+        // РАХУЄМО СУМУ НЕПРОЧИТАНИХ
+        int totalUnread = newChats.fold(0, (sum, item) => sum + item.unreadCount);
+        ChatManager().setUnreadCount(totalUnread);
 
         if (mounted) {
           setState(() {

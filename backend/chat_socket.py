@@ -1,10 +1,9 @@
 import socketio
 from datetime import datetime
 import uuid
-# Імпортуємо AsyncSessionLocal з твого database.py
 from database import AsyncSessionLocal
-from models import Message, User, ChatHidden, ChatMember
-from sqlalchemy import select, delete, and_
+from models import Message, User, ChatHidden, ChatMember, Chat, Friendship
+from sqlalchemy import select, delete, and_, or_
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
@@ -24,18 +23,44 @@ async def send_message(sid, data):
     content = data.get('content')
     reply_to_id = data.get('reply_to_id')
 
-    # 1. Задаємо значення за замовчуванням
     sender_nickname = "User"
 
     async with AsyncSessionLocal() as db:
-        # 2. Отримуємо нікнейм з БД
-        from models import User
+        # --- 1. ПЕРЕВІРКА НА БЛОКУВАННЯ ---
+        chat_res = await db.execute(select(Chat).filter(Chat.id == chat_id))
+        chat = chat_res.scalar_one_or_none()
+
+        # Перевіряємо блок тільки якщо це приватний чат (не група)
+        if chat and not chat.is_group:
+            # Знаходимо співрозмовника
+            stmt_members = select(ChatMember.user_id).where(
+                and_(ChatMember.chat_id == chat_id, ChatMember.user_id != sender_id)
+            )
+            res = await db.execute(stmt_members)
+            recipients = [m[0] for m in res.all()]
+
+            if recipients:
+                recipient_id = recipients[0]
+                # Перевіряємо чи є блокування між цими двома
+                stmt_block = select(Friendship).filter(
+                    or_(
+                        and_(Friendship.user_id == sender_id, Friendship.friend_id == recipient_id, Friendship.status == 'blocked'),
+                        and_(Friendship.user_id == recipient_id, Friendship.friend_id == sender_id, Friendship.status == 'blocked')
+                    )
+                )
+                is_blocked = await db.execute(stmt_block)
+                if is_blocked.scalars().first():
+                    # Якщо є блок - відправляємо помилку ЛИШЕ відправнику (to=sid) і припиняємо роботу
+                    await sio.emit('error', {'message': 'You are blocked by this user!'}, to=sid)
+                    return # БЛОКУЄМО ЗБЕРЕЖЕННЯ І ВІДПРАВКУ!
+
+        # --- 2. ЯКЩО БЛОКУ НЕМАЄ, ПРАЦЮЄМО ДАЛІ ---
         result = await db.execute(select(User).filter_by(id=sender_id))
         user = result.scalar_one_or_none()
         if user:
             sender_nickname = user.nickname
 
-        # 3. Створюємо повідомлення
+        # Створюємо повідомлення
         new_msg = Message(
             id=uuid.uuid4(),
             chat_id=chat_id,
@@ -47,18 +72,14 @@ async def send_message(sid, data):
         )
         db.add(new_msg)
 
-        # --- ЛОГІКА "ОЖИВЛЕННЯ" ЧАТУ ПІСЛЯ ЙОГО ДЕЛІТУ, ЯКЩО ЗНОВ НАПИСАЛИ ---
-        # Видаляємо запис з ChatHidden для ВСІХ учасників цього чату,
-        # щоб чат з'явився у них у списках після отримання повідомлення
+        # ЛОГІКА "ОЖИВЛЕННЯ" ЧАТУ
         await db.execute(
-            delete(ChatHidden).where(
-                ChatHidden.chat_id == chat_id
-            )
+            delete(ChatHidden).where(ChatHidden.chat_id == chat_id)
         )
 
         await db.commit()
 
-    # 4. Тепер sender_nickname точно існує і доступний тут
+    # Емітимо повідомлення всім у кімнаті
     await sio.emit('new_message', {
         'id': str(new_msg.id),
         'chat_id': chat_id,
@@ -76,3 +97,27 @@ async def typing(sid, data):
     chat_id = data.get('chat_id')
     # Відправляємо всім, хто в цій кімнаті, крім того, хто друкує
     await sio.emit('user_typing', {'chat_id': chat_id}, room=str(chat_id), skip_sid=sid)
+
+
+#Notifications.
+@sio.event
+async def connect(sid, environ, auth=None):
+    # Працюємо тільки якщо auth прийшов і він є словником
+    if auth and isinstance(auth, dict):
+        user_id = auth.get('user_id')
+        if user_id:
+            await sio.enter_room(sid, room=str(user_id))
+            print(f"Користувач {user_id} успішно підписався на сповіщення")
+        else:
+            print(f"Помилка: в auth немає user_id для sid {sid}")
+    else:
+        # Спробуємо взяти user_id з query-параметрів (якщо ти передаєш його через URL, як у логах)
+        # У логах бачив: /socket.io/?user_id=1&EIO=4...
+        query_string = environ.get('QUERY_STRING', '')
+        if 'user_id=' in query_string:
+            # Парсимо user_id з рядка запиту
+            user_id = query_string.split('user_id=')[1].split('&')[0]
+            await sio.enter_room(sid, room=str(user_id))
+            print(f"Користувач {user_id} підписався через Query String для sid {sid}")
+        else:
+            print(f"Підключення без auth та без user_id в URL для sid {sid}")

@@ -1,5 +1,6 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../api_config.dart'; // Імпортуємо твій конфіг
+import 'package:flutter/foundation.dart';
 
 class ChatManager {
   static final ChatManager _instance = ChatManager._internal();
@@ -7,6 +8,9 @@ class ChatManager {
   ChatManager._internal();
   int _unreadCount = 0;
   int get unreadCount => _unreadCount;
+  int _friendRequestsCount = 0;
+  int get friendRequestsCount => _friendRequestsCount;
+  VoidCallback? onFriendRequestsChanged;
 
   IO.Socket? _socket;
 
@@ -80,5 +84,10 @@ class ChatManager {
     if (onUnreadChanged != null) {
       onUnreadChanged!();
     }
+  }
+
+  void setFriendRequestsCount(int count) {
+    _friendRequestsCount = count;
+    onFriendRequestsChanged?.call();
   }
 }

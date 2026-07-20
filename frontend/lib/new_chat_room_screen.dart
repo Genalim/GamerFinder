@@ -198,6 +198,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       }
     });
 
+    ChatManager().socket?.on('error', (data) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data['message'] ?? 'Error occurred'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3), // Зникне через 3 секунди
+          ),
+        );
+      }
+    });
+
   }
 
   // Окремий метод для завантаження історії
@@ -541,10 +553,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           final data = item['user'] ?? item;
           final nickname = data['nickname'] ?? 'Unknown';
           final userId = data['id'] ?? 0;
+          final String? avatar = data['avatar']?.toString();
 
           return FriendItem(
             id: userId,
             name: nickname,
+            avatarUrl: avatar,
             status: data['is_online'] == true ? 'online' : 'offline',
             initial: nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
             isOnline: data['is_online'] ?? false,

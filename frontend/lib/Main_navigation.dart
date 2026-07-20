@@ -35,6 +35,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       ChatsScreen(key: _chatsKey),
       const SettingsScreen(),
     ];
+
+    ChatManager().onFriendRequestsChanged = () {
+      if (mounted) setState(() {});
+    };
   }
 
   Future<void> _initChatManager() async {
@@ -90,6 +94,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         selectedIndex: _selectedIndex,
         onTap: _onItemTapped, // Використовуємо наш оновлений метод
         hasUnreadMessage: ChatManager().unreadCount > 0,
+        hasUnreadRequests: ChatManager().friendRequestsCount > 0,
       ),
     );
   }

@@ -47,10 +47,21 @@ class _EditGameSelectionScreenState extends State<EditGameSelectionScreen> {
               var rawGenres = json['genres'];
               if (rawGenres != null) {
                 if (rawGenres is String) {
-                  // Декодуємо рядок у масив
-                  var decoded = jsonDecode(rawGenres);
-                  if (decoded is List) {
-                    parsedGenres = decoded.map((e) => e.toString()).toList();
+                  // Виправляємо формати на кшталт ['Sport'] або ['Simulator', 'Sport']
+                  String cleaned = rawGenres.trim();
+                  if (cleaned.startsWith('[') && cleaned.endsWith(']')) {
+                    cleaned = cleaned.substring(1, cleaned.length - 1); // Зрізаємо дужки
+                    if (cleaned.isNotEmpty) {
+                      parsedGenres = cleaned.split(',').map((e) {
+                        return e.trim().replaceAll("'", "").replaceAll('"', "");
+                      }).where((e) => e.isNotEmpty).toList();
+                    }
+                  } else {
+                    // Якщо це звичайний JSON-рядок
+                    var decoded = jsonDecode(cleaned);
+                    if (decoded is List) {
+                      parsedGenres = decoded.map((e) => e.toString()).toList();
+                    }
                   }
                 } else if (rawGenres is List) {
                   parsedGenres = rawGenres.map((e) => e.toString()).toList();

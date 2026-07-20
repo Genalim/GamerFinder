@@ -51,12 +51,25 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
             List<String> parsedGenres = [];
             try {
               var rawGenres = json['genres'];
-              if (rawGenres is String) {
-                // Якщо це рядок (як у тебе зараз "[...]"), перетворюємо на список
-                parsedGenres = List<String>.from(jsonDecode(rawGenres));
-              } else if (rawGenres is List) {
-                // Якщо раптом прийшов готовий список
-                parsedGenres = List<String>.from(rawGenres);
+              if (rawGenres != null) {
+                if (rawGenres is String) {
+                  String cleaned = rawGenres.trim();
+                  if (cleaned.startsWith('[') && cleaned.endsWith(']')) {
+                    cleaned = cleaned.substring(1, cleaned.length - 1);
+                    if (cleaned.isNotEmpty) {
+                      parsedGenres = cleaned.split(',').map((e) {
+                        return e.trim().replaceAll("'", "").replaceAll('"', "");
+                      }).where((e) => e.isNotEmpty).toList();
+                    }
+                  } else {
+                    var decoded = jsonDecode(cleaned);
+                    if (decoded is List) {
+                      parsedGenres = decoded.map((e) => e.toString()).toList();
+                    }
+                  }
+                } else if (rawGenres is List) {
+                  parsedGenres = rawGenres.map((e) => e.toString()).toList();
+                }
               }
             } catch (e) {
               debugPrint("Помилка парсингу жанрів для гри ${json['name']}: $e");

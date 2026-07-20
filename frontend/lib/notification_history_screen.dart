@@ -69,6 +69,7 @@ class _HistoryScreenState extends State<HistoryScreen> with NotificationCardsMix
 
   Widget _buildHistoryCard(NotificationModel item) {
     return buildFigmaCard(
+      context: context,
       item,
       onAccept: (item) async {
         // Ми ігноруємо результат, якщо нам в історії не потрібен chat_id,

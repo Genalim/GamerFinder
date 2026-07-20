@@ -7,7 +7,7 @@ from sqlalchemy import select, and_, delete, update, or_, func, desc, case, text
 from sqlalchemy.orm import selectinload
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import Query
+from fastapi import Query, Body
 
 from chat_socket import sio
 
@@ -24,6 +24,7 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi import Depends
 import uuid
+from pydantic import BaseModel
 
 from schemas import (
     UserCreate,
@@ -245,6 +246,104 @@ async def get_my_profile(token: str = Header(...), db: AsyncSession = Depends(ge
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # --- ТЕСТОВА ЛОГІКА ПЕРЕВІРКИ ЕКСПІРАЦІЇ PRO (6 ГОДИН) ---
+    if user.is_pro and user.pro_expiry_date:
+        now = datetime.utcnow()
+        if now >= user.pro_expiry_date:
+            # Час вийшов повністю — знімаємо PRO
+            user.is_pro = False
+
+            existing_expired = await db.execute(
+                select(Notification).filter(
+                    Notification.recipient_id == user.id,
+                    Notification.game == "expired",
+                    Notification.is_archived == False
+                )
+            )
+            if not existing_expired.scalars().first():
+                expired_notif = Notification(
+                    id=str(uuid.uuid4()),
+                    recipient_id=user.id,
+                    sender_id=user.id,
+                    message="Your PRO subscription has ended.",
+                    type="pro",
+                    state="pending",
+                    game="expired",
+                    created_at=datetime.utcnow()
+                )
+                db.add(expired_notif)
+            await db.commit()
+        else:
+            time_left = user.pro_expiry_date - now
+
+            # 1) Перше нагадування: коли залишилось менше або рівно 2 години
+            if time_left <= timedelta(hours=2) and time_left > timedelta(hours=1):
+                existing_expiring = await db.execute(
+                    select(Notification).filter(
+                        Notification.recipient_id == user.id,
+                        Notification.game == "expiring",
+                        Notification.is_archived == False
+                    )
+                )
+                if not existing_expiring.scalars().first():
+                    expiring_notif = Notification(
+                        id=str(uuid.uuid4()),
+                        recipient_id=user.id,
+                        sender_id=user.id,
+                        message="Your PRO plan expires soon!",
+                        type="pro",
+                        state="pending",
+                        game="expiring",
+                        created_at=datetime.utcnow()
+                    )
+                    db.add(expiring_notif)
+                    await db.commit()
+
+            # 2) Друге нагадування: коли залишилось менше або рівно 1 година
+            elif time_left <= timedelta(hours=1):
+                existing_expiring_soon = await db.execute(
+                    select(Notification).filter(
+                        Notification.recipient_id == user.id,
+                        Notification.game == "expiring",
+                        Notification.is_archived == False
+                    )
+                )
+                # Якщо хочеш розрізняти тексти для 2 годин і 1 години,
+                # тут можна додати ще одну перевірку або оновити існуючу картку.
+
+    # Оригінальна логіка тріалу (без змін)
+    if not user.is_pro and not user.pro_trial_used:
+        # 1. Перевіряємо, чи немає вже активної картки тріалу
+        existing_trial = await db.execute(
+            select(Notification).filter(
+                Notification.recipient_id == user.id,
+                Notification.game == "trial_available",
+                Notification.is_archived == False
+            )
+        )
+
+        if not existing_trial.scalars().first():
+            # 2. Перевіряємо, чи пройшов час після того, як він її видалив (наприклад, 1 година)
+            can_show_trial = True
+            if user.pro_trial_dismissed_at:
+                cooldown_period = timedelta(hours=1) # Час, через який тріал з'явиться знову
+                if datetime.utcnow() < user.pro_trial_dismissed_at + cooldown_period:
+                    can_show_trial = False
+
+            if can_show_trial:
+                trial_notif = Notification(
+                    id=str(uuid.uuid4()),
+                    recipient_id=user.id,
+                    sender_id=user.id,
+                    message="Try PRO for free for 7 days!",
+                    type="pro",
+                    state="pending",
+                    game="trial_available",
+                    created_at=datetime.utcnow()
+                )
+                db.add(trial_notif)
+                await db.commit()
 
     return user
 
@@ -920,6 +1019,21 @@ async def send_invite(
     db.add(new_notif)
     await db.commit()
 
+    # Отримуємо нікнейм відправника для гарного повідомлення
+    sender = await db.get(User, current_user_id)
+
+    await sio.emit('new_notification', {
+        "id": new_notif.id,
+        "user_nickname": sender.nickname,
+        "message": new_notif.message,
+        "type": new_notif.type,
+        "state": new_notif.state,
+        "game": new_notif.game,
+        "sender_id": str(new_notif.sender_id),
+        "time": new_notif.created_at.isoformat()
+    }, room=str(data.recipient_id)) # room = ID отримувача
+    # ----------------
+
     return {"status": "success", "message": "Invite sent successfully"}
 
 @app.get("/notifications")
@@ -957,6 +1071,18 @@ async def get_my_notifications(
                 game="Match Rating"
             )
             db.add(new_notif)
+            await db.flush()
+
+            await sio.emit('new_notification', {
+                "id": new_notif.id,
+                "user_nickname": "Teammate", # або логіка отримання ніку
+                "message": new_notif.message,
+                "type": "rating",
+                "state": "pending",
+                "game": "Match Rating",
+                "sender_id": str(req.sender_id if user_id == req.receiver_id else req.receiver_id),
+                "time": datetime.utcnow().isoformat()
+            }, room=str(user_id))
 
         req.is_notification_sent = True
 
@@ -1006,6 +1132,7 @@ async def get_my_notifications(
         response.append({
             "id": notif.id,
             "sender_id": notif.sender_id,
+            "recipient_id": notif.recipient_id,
             "user_nickname": other_user.nickname if other_user else "Unknown",
             "is_sender_online": other_user.is_online if other_user else False,
             "is_sender_pro": other_user.is_pro if other_user else False,
@@ -1025,24 +1152,33 @@ async def delete_notification(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # 1. Знаходимо нотифікацію (без умови recipient_id, щоб знайти її і як відправник)
+    # 1. Знаходимо нотифікацію
     result = await db.execute(select(Notification).filter(Notification.id == notification_id))
     notif = result.scalars().first()
 
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    # 2. Перевірка: чи належить вона нам (або ми sender, або recipient)
+    # 2. Перевірка: чи належить вона нам
     if notif.recipient_id != current_user_id and notif.sender_id != current_user_id:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # 3. ЗАХИСТ: Дозволяємо видалення тільки якщо вона в історії (is_archived)
-    # АБО якщо це expired інвайт
-    if not notif.is_archived and notif.state != "expired" and notif.type != "rating":
+    # 3. ЗАХИСТ: Дозволяємо видалення якщо:
+    # - вона в історії (is_archived)
+    # - або це expired інвайт
+    # - або це тип rating
+    # - АБО це наша картка trial_available (яку можна видаляти хрестиком)
+    if not notif.is_archived and notif.state != "expired" and notif.type != "rating" and notif.game != "trial_available":
         raise HTTPException(
             status_code=403,
             detail="Cannot delete active notification. Archive it first."
         )
+
+    # 4. Якщо це тріал — оновлюємо час закриття для кулдауну
+    if notif.game == "trial_available":
+        user = await db.get(User, current_user_id)
+        if user:
+            user.pro_trial_dismissed_at = datetime.utcnow()
 
     await db.delete(notif)
     await db.commit()
@@ -1139,7 +1275,7 @@ async def archive_notification(id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Not found")
 
     # ЗАБОРОНА: Не можна архівувати pending інвайти
-    if notif.state == "pending" and notif.type != "rating":
+    if notif.state == "pending" and notif.type not in ["rating", "pro"]:
         raise HTTPException(status_code=400, detail="Cannot archive pending invite")
 
     notif.is_archived = True
@@ -1166,15 +1302,37 @@ async def archive_all_notifications(
     if notification_type:
         type_condition = (Notification.type == notification_type)
 
-    # Комбінуємо все разом
+    # Комбінуємо все разом для звичайного архівування,
+    # але виключаємо trial_available з масового закидання в архів
     stmt = (
         update(Notification)
         .where(base_access_condition)
         .where(type_condition) # Додаємо фільтрацію типу
+        .where(Notification.game != "trial_available") # <--- Тріал не архівуємо
         .values(is_archived=True)
     )
 
     await db.execute(stmt)
+
+    # Якщо користувач робить archive-all на PRO або у загальному списку ('All' -> notification_type is None),
+    # ми додатково видаляємо ТІЛЬКИ активну картку тріалу і запускаємо кулдаун (годинний таймер)
+    if notification_type is None or notification_type == "pro":
+        active_trial_res = await db.execute(
+            select(Notification).filter(
+                Notification.recipient_id == current_user_id,
+                Notification.game == "trial_available",
+                Notification.is_archived == False
+            )
+        )
+        trial_notif = active_trial_res.scalars().first()
+
+        if trial_notif:
+            user = await db.get(User, current_user_id)
+            if user:
+                user.pro_trial_dismissed_at = datetime.utcnow()
+
+            await db.delete(trial_notif)
+
     await db.commit()
     return {"status": "ok"}
 
@@ -1234,7 +1392,8 @@ async def get_notifications_history(
     return response
 
 
-
+class GetOrCreateChatRequest(BaseModel):
+    recipient_id: int
 #=====Chats=======#
 @app.post("/chats/get-or-create")
 async def get_or_create_chat(
@@ -1242,8 +1401,18 @@ async def get_or_create_chat(
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    # Шукаємо приватний чат (не груповий), де є саме ці два користувачі
-    # Використовуємо чистий SQL через text(), це найнадійніший спосіб згрупувати учасників діалогу
+    # 1. Перевірка на блок
+    stmt_block = select(Friendship).filter(
+        or_(
+            and_(Friendship.user_id == current_user_id, Friendship.friend_id == recipient_id, Friendship.status == 'blocked'),
+            and_(Friendship.user_id == recipient_id, Friendship.friend_id == current_user_id, Friendship.status == 'blocked')
+        )
+    )
+    is_blocked = await db.execute(stmt_block)
+    if is_blocked.scalars().first():
+        raise HTTPException(status_code=403, detail="Ви не можете спілкуватися з цим користувачем")
+
+    # 2. Пошук існуючого чату
     stmt = text("""
         SELECT cm.chat_id 
         FROM chat_members cm
@@ -1252,25 +1421,31 @@ async def get_or_create_chat(
         GROUP BY cm.chat_id
         HAVING COUNT(DISTINCT cm.user_id) = 2
     """)
-
     res = await db.execute(stmt, {"u1": current_user_id, "u2": recipient_id})
     chat_id = res.scalar()
 
-    if chat_id:
-        print(f"DEBUG: Знайдено існуючий чат ID: {chat_id} для юзерів {current_user_id} та {recipient_id}")
-        return {"chat_id": str(chat_id)}
+    # Якщо чату немає — створюємо
+    if not chat_id:
+        print(f"DEBUG: Чату немає, створюємо новий приватний чат...")
+        new_chat = Chat(is_group=False)
+        db.add(new_chat)
+        await db.flush()
+        chat_id = new_chat.id
+        db.add(ChatMember(chat_id=chat_id, user_id=current_user_id))
+        db.add(ChatMember(chat_id=chat_id, user_id=recipient_id))
+        await db.commit() # Фіксуємо створення
+    else:
+        print(f"DEBUG: Знайдено існуючий чат ID: {chat_id}")
 
-    # ЯКЩО ЧАТУ НЕМАЄ — СТВОРЮЄМО ЙОГО
-    print(f"DEBUG: Чату немає, створюємо новий приватний чат...")
-    new_chat = Chat(is_group=False)
-    db.add(new_chat)
-    await db.flush() # Отримуємо UUID нового чату
-
-    db.add(ChatMember(chat_id=new_chat.id, user_id=current_user_id))
-    db.add(ChatMember(chat_id=new_chat.id, user_id=recipient_id))
+    # 3. АНХАЙД: Видаляємо хайд для себе (працює і для знайденого, і для нового)
+    await db.execute(
+        delete(ChatHidden).where(
+            and_(ChatHidden.chat_id == chat_id, ChatHidden.user_id == current_user_id)
+        )
+    )
     await db.commit()
 
-    return {"chat_id": str(new_chat.id)}
+    return {"chat_id": str(chat_id)}
 
 @app.get("/messages/{chat_id}")
 async def get_messages(
@@ -1400,6 +1575,7 @@ async def get_chats(
             "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
             "unread_count": 0, # (тут твоя логіка)
             "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
+            "is_online": others[0].is_online if (not chat.is_group and others) else False,
             "is_group": chat.is_group,
             "initials": [u.nickname[0].upper() for u in others[:4]],
             "last_message_status": last_msg.status if last_msg else "sent",
@@ -1595,6 +1771,15 @@ async def create_group_chat(
     existing_chat_id = res.scalar()
 
     if existing_chat_id:
+        # ОСЬ ТУТ КЛЮЧОВИЙ МОМЕНТ:
+        # Ми знайшли старий чат, який ти колись захайдав.
+        # Видаляємо хайд для себе, щоб він знову з'явився у тебе в списку.
+        await db.execute(
+            delete(ChatHidden).where(
+                and_(ChatHidden.chat_id == existing_chat_id, ChatHidden.user_id == current_user_id)
+            )
+        )
+        await db.commit()
         return {"chat_id": str(existing_chat_id)}
 
     # Якщо чату немає — створюємо новий
@@ -1847,6 +2032,63 @@ async def search_messages(
 
     # Повертаємо знайдені повідомлення
     return [{"id": str(m.id), "content": m.content, "created_at": m.created_at.isoformat()} for m in messages]
+
+#PRO Notifications.
+
+@app.post("/pro/activate")
+async def activate_pro(
+        data: dict, # Очікуємо {"trial": true/false}
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    user = await db.get(User, current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    is_trial = data.get("trial", False)
+    base_time = datetime.utcnow()
+
+    # Накопичення днів/годин: якщо PRO ще активний, плюсуємо до його кінця
+    if user.is_pro and user.pro_expiry_date and user.pro_expiry_date > base_time:
+        base_time = user.pro_expiry_date
+
+    if is_trial:
+        if user.pro_trial_used:
+            raise HTTPException(status_code=400, detail="Trial already used")
+        user.pro_trial_used = True
+        user.is_pro = True
+        user.pro_expiry_date = base_time + timedelta(days=7) # Тріал залишаємо 7 днів (або теж можна скоротити, якщо треба)
+    else:
+        user.is_pro = True
+        # === ТЕСТОВИЙ РЕЖИМ: 6 годин замість 30 днів ===
+        user.pro_expiry_date = base_time + timedelta(hours=6)
+
+    # Нотифікація про активацію (activated)
+    new_notif = Notification(
+        id=str(uuid.uuid4()),
+        recipient_id=current_user_id,
+        sender_id=current_user_id,
+        message="Welcome to PRO! Enjoy your advanced filters.",
+        type="pro",
+        state="pending",
+        game="activated",
+        created_at=datetime.utcnow()
+    )
+    db.add(new_notif)
+    await db.commit()
+
+    await sio.emit('new_notification', {
+        "id": new_notif.id,
+        "user_nickname": user.nickname,
+        "message": new_notif.message,
+        "type": new_notif.type,
+        "state": new_notif.state,
+        "game": new_notif.game,
+        "sender_id": str(current_user_id),
+        "time": new_notif.created_at.isoformat()
+    }, room=str(current_user_id))
+
+    return {"status": "success", "is_pro": user.is_pro, "expiry_date": user.pro_expiry_date.isoformat()}
 
 
 

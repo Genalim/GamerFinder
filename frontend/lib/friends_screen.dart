@@ -8,6 +8,7 @@ import 'Home_Feed_screen.dart';
 import 'gamer_profile_screen.dart';
 import 'user_session.dart';
 import 'new_chat_room_screen.dart';
+import 'services/chat_manager.dart';
 
 // =============================================================================
 // МОДЕЛЬ ДАНИХ ДЛЯ ЕКРАНУ
@@ -52,6 +53,8 @@ class FriendItem {
     List<String> games = (data['games'] != null)
     ? (data['games'] as List).map((g) => g['game']['name'].toString()).toList()
         : [];
+
+    debugPrint("DEBUG: Парсинг друга: ${data['nickname']}, аватар: ${data['avatar']}");
 
     return FriendItem(
       // friendshipId беремо з кореня (це id запису дружби)
@@ -243,6 +246,13 @@ class _FriendsScreenState extends State<FriendsScreen> {
     _loadData();      // Запити
     _loadFriends();   // Друзі
     _loadBlocked();   // Заблоковані
+
+    ChatManager().socket?.on('new_friend_request', (data) {
+      debugPrint("DEBUG: Прийшов новий запит в друзі!");
+      if (mounted) {
+        _loadData(); // Автоматично перезавантажуємо запити
+      }
+    });
   }
   Future<void> _loadData() async {
     if (_isProcessing) return;
@@ -257,6 +267,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
         List<dynamic> reqList = json.decode(reqResponse.body);
         List<dynamic> frList = json.decode(friendsResponse.body);
 
+        ChatManager().setFriendRequestsCount(reqList.length);
+
         Set<int> seenRequestIds = {};
         List<FriendItem> uniqueRequests = [];
         for (var item in reqList) {
@@ -269,6 +281,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
         setState(() {
           _requestsList = uniqueRequests;
           _friendsList = frList.map((item) => FriendItem.fromJson(item)).toList();
+          _hasUnreadRequests = reqList.isNotEmpty;
         });
       }
     } catch (e) {
@@ -418,6 +431,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   setState(() {
                     _selectedTab = 1;
                     _hasUnreadRequests = false; // Прочитано! Кружечок зникає
+                    ChatManager().setFriendRequestsCount(0);
                   });
                 },
                 child: Container(

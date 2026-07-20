@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'api_config.dart';
 import 'dart:convert';
 import 'notification_history_screen.dart';
+import 'subscription_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -388,7 +389,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: const Text('GamerFinder PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               subtitle: const Text('Manage your premium status', style: TextStyle(color: Colors.white60)),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
-              onTap: () {},
+              onTap: () {Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SubscriptionScreen()),
+              );},
             ),
           ),
           const SizedBox(height: 20),

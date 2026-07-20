@@ -433,12 +433,14 @@ class NeonBottomNavigator extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onTap;
   final bool hasUnreadMessage;
+  final bool hasUnreadRequests;
 
   const NeonBottomNavigator({
     super.key,
     required this.selectedIndex,
     required this.onTap,
     this.hasUnreadMessage = false,
+    this.hasUnreadRequests = false,
   });
 
   // 1. Рідні SVG рядки для кожного стану
@@ -491,17 +493,14 @@ class NeonBottomNavigator extends StatelessWidget {
 
   Widget _buildItem(int index, String svgRaw) {
     final isSelected = selectedIndex == index;
-    // Визначаємо колір: активний — зелений (#00F5A0), неактивний — сірий (#8E8EA9)
     final String colorHex = isSelected ? '#00F5A0' : '#8E8EA9';
-
-    // Підставляємо потрібний колір прямо в SVG код
     final String dynamicSvg = svgRaw.replaceAll('CURRENT_COLOR', colorHex);
 
     return GestureDetector(
       onTap: () => onTap(index),
       behavior: HitTestBehavior.opaque,
       child: Stack(
-        clipBehavior: Clip.none, // Щоб крапка не обрізалася
+        clipBehavior: Clip.none,
         children: [
           Container(
             width: 42,
@@ -513,19 +512,19 @@ class NeonBottomNavigator extends StatelessWidget {
               height: index == 1 ? 37 : 36,
             ),
           ),
-          // НЕОНОВА КРАПКА
-          if (index == 2 && hasUnreadMessage) // Перевіряємо індекс і стан
+
+          // 1. КРАПКА ДЛЯ ЧАТІВ (index 2)
+          if (index == 2 && hasUnreadMessage)
             Positioned(
-              right: 2,
-              top: 2,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF00F5A0),
-                  shape: BoxShape.circle,
-                ),
-              ),
+              right: -2, top: -2,
+              child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Color(0xFF00F5A0), shape: BoxShape.circle)),
+            ),
+
+          // 2. КРАПКА ДЛЯ ДРУЗІВ (index 1) - ДОДАЙ ЦЕ
+          if (index == 1 && hasUnreadRequests)
+            Positioned(
+              right: -2, top: -2,
+              child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Color(0xFF00F5A0), shape: BoxShape.circle)),
             ),
         ],
       ),
