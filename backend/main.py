@@ -84,7 +84,7 @@ async def startup_event():
         # Це команда, яка змушує SQLAlchemy перечитати реальну структуру з бази
         await conn.run_sync(Base.metadata.reflect)
 
-socket_app = socketio.ASGIApp(sio, app)
+#app = socketio.ASGIApp(sio, app)
 
 #Це для аватарок клієнта.
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -2093,6 +2093,8 @@ async def activate_pro(
 
 
 
+app = socketio.ASGIApp(sio, app)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:socket_app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

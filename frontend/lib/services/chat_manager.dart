@@ -24,17 +24,19 @@ class ChatManager {
   void init(String userId) {
     if (_socket != null) return;
 
-    // Використовуємо ApiConfig.baseUrl
+    print('DEBUG: Ініціалізація сокета для користувача: $userId');
+
+    // Передаємо параметри у вигляді єдиного коректного об'єкта підключення
     _socket = IO.io(ApiConfig.baseUrl, <String, dynamic>{
       'transports': ['websocket'],
+      'path': '/socket.io/',
       'autoConnect': false,
-      'query': {'user_id': userId},
+      // Передаємо виключно через auth, оскільки бекенд опрацьовує його першим
+      'auth': {'user_id': userId.toString()},
       'connectTimeout': 10000,
       'reconnection': true,
       'reconnectionAttempts': 5,
     });
-
-
 
     // Підключення
     _socket!.onConnect((_) {
