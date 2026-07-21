@@ -753,16 +753,18 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
   Widget buildAvatar(String? avatarUrl, String initial, double size) {
     if (avatarUrl == null || avatarUrl.isEmpty) {
-      return _buildLetterAvatar(initial, size); // Передаємо size
+      return _buildLetterAvatar(initial, size);
     }
-    if (avatarUrl.startsWith('http')) {
-      return Image.network(
-        avatarUrl, width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
-      );
-    }
-    return Image.asset(
-      avatarUrl, width: size, height: size, fit: BoxFit.cover,
+
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
+        ? avatarUrl
+        : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
+
+    return Image.network(
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
     );
   }

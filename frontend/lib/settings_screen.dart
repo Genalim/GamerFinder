@@ -119,38 +119,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Метод для генерації аватара
   Widget _buildAvatar(String nickname, String? imageUrl) {
     if (imageUrl != null && imageUrl.isNotEmpty) {
-      if (imageUrl.startsWith('assets/')) {
-        return Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF00F5A0), width: 1),
-            image: DecorationImage(
-              image: AssetImage(imageUrl),
-              fit: BoxFit.cover,
-            ),
+      final String fullAvatarUrl = imageUrl.startsWith('http')
+          ? imageUrl
+          : '${ApiConfig.baseUrl}${imageUrl.startsWith('/') ? imageUrl : '/$imageUrl'}';
+
+      return Container(
+        width: 100,
+        height: 100,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: const Color(0xFF00F5A0), width: 1),
+          image: DecorationImage(
+            image: NetworkImage(fullAvatarUrl),
+            fit: BoxFit.cover,
           ),
-        );
-      } else {
-        return Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF00F5A0), width: 1),
-            image: DecorationImage(
-              image: NetworkImage(imageUrl),
-              fit: BoxFit.cover,
-            ),
-          ),
-        );
-      }
+        ),
+      );
     } else {
       String firstLetter = nickname.isNotEmpty ? nickname[0].toUpperCase() : '';
       return Container(
-        width: 64,
-        height: 64,
+        width: 100,
+        height: 100,
         decoration: BoxDecoration(
           color: const Color(0xFF181826),
           shape: BoxShape.circle,
@@ -170,8 +159,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               fontFamily: 'Love Light',
               fontStyle: FontStyle.normal,
               fontWeight: FontWeight.w400,
-              fontSize: 30,
-              height: 27 / 30,
+              fontSize: 45,
               color: Color(0xFF00F5A0),
             ),
           ),

@@ -223,40 +223,33 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
       return _buildLetterAvatar(initial, size);
     }
 
-    // 1. Пріоритет: спробуй знайти файл локально (як у FriendsScreen)
-    if (avatarUrl.startsWith('assets/')) {
-      return Image.asset(
-        avatarUrl,
-        width: size, height: size, fit: BoxFit.cover,
-        // Якщо локально не знайшов (наприклад, файл не вшитий в цей APK),
-        // спробуй все ж таки піти на сервер
-        errorBuilder: (context, error, stackTrace) => _fallbackToNetwork(avatarUrl, initial, size),
-      );
-    }
-
-    // 2. Якщо шлях не починається з assets, ідемо одразу на сервер
-    return _fallbackToNetwork(avatarUrl, initial, size);
-  }
-
-// Допоміжний метод для мережі
-  Widget _fallbackToNetwork(String avatarUrl, String initial, double size) {
-    final fullUrl = avatarUrl.startsWith('http')
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
         ? avatarUrl
-        : ApiConfig.baseUrl + (avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl');
+        : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
 
     return Image.network(
-      fullUrl,
-      width: size, height: size, fit: BoxFit.cover,
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
     );
   }
 
   Widget _buildLetterAvatar(String initial, double size) {
     return Container(
-      width: size, height: size,
+      width: size,
+      height: size,
       decoration: const BoxDecoration(color: Color(0xFF0F0F13), shape: BoxShape.circle),
       child: Center(
-          child: Text(initial, style: TextStyle(fontFamily: 'Love Light', fontSize: size * 0.7, color: const Color(0xFF00F5A0)))
+        child: Text(
+          initial,
+          style: TextStyle(
+            fontFamily: 'Love Light',
+            fontSize: size * 0.7,
+            color: const Color(0xFF00F5A0),
+          ),
+        ),
       ),
     );
   }

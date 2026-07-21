@@ -10,6 +10,7 @@ import 'custom_widgets.dart';
 import 'api_config.dart';
 import 'user_session.dart';
 import 'Home_Feed_screen.dart'; // Для GamerProfile.fromJson
+import 'subscription_screen.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -62,6 +63,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAvatarAssets();
     final user = UserSession().currentUser;
 
     // Заповнюємо поля поточними даними з сесії
@@ -269,22 +271,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _loadAvatarAssets() async {
     try {
-      final manifest = await AssetManifest.loadFromAssetBundle(DefaultAssetBundle.of(context));
-      final freePaths = manifest.listAssets().where((path) => path.startsWith('assets/avatars/free/') && (path.endsWith('.webp') || path.endsWith('.jpg'))).toList();
-      final proPaths = manifest.listAssets().where((path) => path.startsWith('assets/avatars/pro/') && (path.endsWith('.webp') || path.endsWith('.jpg'))).toList();
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/avatars-list'),
+      );
 
-      freePaths.sort();
-      proPaths.sort();
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> freeList = data['free'] ?? [];
+        final List<dynamic> proList = data['pro'] ?? [];
 
-      if (mounted) {
-        setState(() {
-          _freeAvatars = freePaths;
-          _proAvatars = proPaths;
-          _isLoadingAssets = false;
-        });
+        if (mounted) {
+          setState(() {
+            _freeAvatars = freeList.map((e) => e.toString()).toList();
+            _proAvatars = proList.map((e) => e.toString()).toList();
+            _isLoadingAssets = false;
+          });
+
+          for (var url in _freeAvatars) {
+            precacheImage(NetworkImage('${url.startsWith('http') ? '' : ApiConfig.baseUrl}$url'), context);
+          }
+          for (var url in _proAvatars) {
+            precacheImage(NetworkImage('${url.startsWith('http') ? '' : ApiConfig.baseUrl}$url'), context);
+          }
+        }
       }
     } catch (e) {
-      debugPrint("Error loading avatar assets: $e");
+      debugPrint("Error loading avatars from server: $e");
     }
   }
 
@@ -523,13 +535,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             itemCount: currentAvatars.length,
                             itemBuilder: (context, index) {
                               String path = currentAvatars[index];
+                              final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
                               bool isSelected = tempPath == path;
 
                               return GestureDetector(
                                 onTap: () {
-                                  // Додаємо перевірку: якщо таб PRO, але юзер не PRO — нічого не робимо
-                                  if (!_isFreeTab && !(UserSession().currentUser?.isPro ?? false)) {
-                                    return;
+                                  bool isUserPro = UserSession().currentUser?.isPro ?? false;
+                                  if (!_isFreeTab && !isUserPro) {
+                                    return; // Якщо вкладка PRO і юзер не PRO — нічого не відбувається при кліку
                                   }
                                   setModalState(() => tempPath = path);
                                 },
@@ -545,13 +558,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                     child: ClipOval(
                                       child: Stack(
                                         children: [
-                                          Image.asset(
-                                            path,
+                                          Image.network(
+                                            fullAvatarUrl,
                                             fit: BoxFit.cover,
                                             width: 100,
                                             height: 100,
-                                            cacheWidth: 150,
                                             filterQuality: FilterQuality.low,
+                                            errorBuilder: (context, error, stackTrace) =>
+                                            const Icon(Icons.error, color: Colors.red),
                                           ),
                                           if (!_isFreeTab && !(UserSession().currentUser?.isPro ?? false)) ...[
                                             Container(color: Colors.black.withOpacity(0.6)),
@@ -569,16 +583,45 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             Positioned(
                               bottom: 185, left: 0, right: 0,
                               child: IgnorePointer(
+                                ignoring: false, // Дозволяємо кліки на кнопку Settings усередині
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   color: Colors.transparent,
                                   child: RichText(
                                     textAlign: TextAlign.center,
-                                    text: const TextSpan(
-                                      style: TextStyle(fontFamily: 'Poppins', fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white),
+                                    text: TextSpan(
+                                      style: const TextStyle(
+                                        fontFamily: 'Poppins',
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.white,
+                                      ),
                                       children: [
-                                        TextSpan(text: 'Unlock with GameBuddy PRO in '),
-                                        TextSpan(text: 'Settings', style: TextStyle(color: Color(0xFF00F5A0), fontWeight: FontWeight.w600)),
+                                        const TextSpan(text: 'Unlock with GameBuddy PRO in '),
+                                        WidgetSpan(
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              // 1. Закриваємо модалку вибору аватарок
+                                              Navigator.pop(context);
+                                              // 2. Переходимо на екран підписки
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) => const SubscriptionScreen(),
+                                                ),
+                                              );
+                                            },
+                                            child: const Text(
+                                              'Settings',
+                                              style: TextStyle(
+                                                color: Color(0xFF00F5A0),
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'Poppins',
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -729,9 +772,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               image: _imageFile != null
                   ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover)
                   : (_selectedAvatarPath != null
-                  ? (_selectedAvatarPath!.startsWith('assets/')
-                  ? DecorationImage(image: AssetImage(_selectedAvatarPath!), fit: BoxFit.cover)
-                  : DecorationImage(image: NetworkImage(_selectedAvatarPath!), fit: BoxFit.cover))
+                  ? DecorationImage(
+                image: NetworkImage(
+                  _selectedAvatarPath!.startsWith('http')
+                      ? _selectedAvatarPath!
+                      : '${ApiConfig.baseUrl}$_selectedAvatarPath',
+                ),
+                fit: BoxFit.cover,
+              )
                   : null),
             ),
             child: (_imageFile == null && _selectedAvatarPath == null)

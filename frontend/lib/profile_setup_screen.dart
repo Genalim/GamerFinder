@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:convert';
 import 'api_config.dart';
+import 'user_session.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -174,6 +175,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAvatarAssets();
 
     // Заповнюємо поля тим, що збережено в менеджері (якщо там пусто — буде просто порожній рядок)
     _nicknameController = TextEditingController(text: _manager.nickname);
@@ -196,46 +198,35 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _loadAvatarAssets();
-  }
-
   Future<void> _loadAvatarAssets() async {
     try {
-      final manifest = await AssetManifest.loadFromAssetBundle(
-          DefaultAssetBundle.of(context));
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/avatars-list'),
+      );
 
-      final freePaths = manifest.listAssets().where((path) =>
-      path.startsWith('assets/avatars/free/') &&
-          (path.endsWith('.webp') || path.endsWith('.jpg'))
-      ).toList();
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> freeList = data['free'] ?? [];
+        final List<dynamic> proList = data['pro'] ?? [];
 
-      final proPaths = manifest.listAssets().where((path) =>
-      path.startsWith('assets/avatars/pro/') &&
-          (path.endsWith('.webp') || path.endsWith('.jpg'))
-      ).toList();
+        if (mounted) {
+          setState(() {
+            _freeAvatars = freeList.map((e) => e.toString()).toList();
+            _proAvatars = proList.map((e) => e.toString()).toList();
+            _isLoadingAssets = false;
+          });
 
-      freePaths.sort();
-      proPaths.sort();
-
-      if (mounted) {
-        setState(() {
-          _freeAvatars = freePaths;
-          _proAvatars = proPaths;
-          _isLoadingAssets = false;
-        });
-
-        for (var path in freePaths) {
-          precacheImage(AssetImage(path), context);
-        }
-        for (var path in proPaths) {
-          precacheImage(AssetImage(path), context);
+          // Кешуємо мережеві картинки для плавності
+          for (var url in _freeAvatars) {
+            precacheImage(NetworkImage(url), context);
+          }
+          for (var url in _proAvatars) {
+            precacheImage(NetworkImage(url), context);
+          }
         }
       }
     } catch (e) {
-      print("Error loading avatar assets: $e");
+      print("Error loading avatars from server: $e");
     }
   }
 
@@ -523,11 +514,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                             itemCount: currentAvatars.length,
                             itemBuilder: (context, index) {
                               String path = currentAvatars[index];
+                              final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
                               bool isSelected = tempPath == path;
 
                               return GestureDetector(
-                                onTap: () =>
-                                    setModalState(() => tempPath = path),
+                                onTap: () {
+                                  // Якщо це вкладка PRO, перевіряємо чи юзер має PRO (можеш підставити свою перевірку)
+                                  bool isUserPro = UserSession().currentUser?.isPro ?? false;
+                                  if (!_isFreeTab && !isUserPro) {
+                                    // Якщо немає PRO — нічого не робимо (або показуємо сповіщення)
+                                    return;
+                                  }
+                                  setModalState(() => tempPath = path);
+                                },
                                 child: RepaintBoundary(
                                   child: Container(
                                     decoration: BoxDecoration(
@@ -541,13 +540,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                                     child: ClipOval(
                                       child: Stack(
                                         children: [
-                                          Image.asset(
-                                            path,
+                                          Image.network(
+                                            fullAvatarUrl,
                                             fit: BoxFit.cover,
                                             width: 100,
                                             height: 100,
-                                            cacheWidth: 150,
                                             filterQuality: FilterQuality.low,
+                                            errorBuilder: (context, error, stackTrace) =>
+                                            const Icon(Icons.error, color: Colors.red),
                                           ),
                                           if (!_isFreeTab) ...[
                                             Container(
@@ -597,6 +597,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                                             color: Color(0xFF00F5A0),
                                             fontWeight: FontWeight.w600,
                                           ),
+                                        ),
+                                        TextSpan(
+                                          text: '\nafter registration', // Перенесення перед after, далі такий самий білий стиль
                                         ),
                                       ],
                                     ),
@@ -803,10 +806,18 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               border: Border.all(color: const Color(0xFF00F5A0), width: 1),
               image: _imageFile != null
                   ? DecorationImage(
-                  image: FileImage(_imageFile!), fit: BoxFit.cover)
+                image: FileImage(_imageFile!),
+                fit: BoxFit.cover,
+              )
                   : (_selectedAvatarPath != null
                   ? DecorationImage(
-                  image: AssetImage(_selectedAvatarPath!), fit: BoxFit.cover)
+                image: NetworkImage(
+                  _selectedAvatarPath!.startsWith('http')
+                      ? _selectedAvatarPath!
+                      : '${ApiConfig.baseUrl}${_selectedAvatarPath!.startsWith('/') ? _selectedAvatarPath! : '/$_selectedAvatarPath'}',
+                ),
+                fit: BoxFit.cover,
+              )
                   : null),
             ),
             child: (_imageFile == null && _selectedAvatarPath == null)

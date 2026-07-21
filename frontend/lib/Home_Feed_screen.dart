@@ -803,12 +803,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
             // 2. Логіка відображення аватарки
             child: ClipOval(
               child: (currentUser != null && currentUser.avatar != null && currentUser.avatar!.isNotEmpty)
-                  ? Image.asset(
-                currentUser.avatar!,
+                  ? Image.network(
+                currentUser.avatar!.startsWith('http')
+                    ? currentUser.avatar!
+                    : '${ApiConfig.baseUrl}${currentUser.avatar}',
                 fit: BoxFit.cover,
+                width: 33,
+                height: 33,
                 errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(currentUser.nickname),
               )
-                  : _buildLetterAvatar(currentUser?.nickname ?? '?'), // ВИПРАВЛЕНО ТУТ
+                  : _buildLetterAvatar(currentUser?.nickname ?? '?'),
             ),
           ),
           const SizedBox(width: 4),
@@ -1382,11 +1386,14 @@ class _GamerCardState extends State<GamerCard> {
                         ),
                         child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
                             ? ClipOval(
-                          child: Image.asset(
-                            widget.profile.avatar!,
+                          child: Image.network(
+                            widget.profile.avatar!.startsWith('http')
+                                ? widget.profile.avatar!
+                                : '${ApiConfig.baseUrl}${widget.profile.avatar}',
                             fit: BoxFit.cover,
-                            width: 72,
-                            height: 72,
+                            width: 64,
+                            height: 64,
+                            errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),
                           ),
                         )
                             : _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),

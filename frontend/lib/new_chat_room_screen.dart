@@ -874,19 +874,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       return _buildLetterAvatar(initial);
     }
 
-    // Якщо це мережевий URL (з бекенда)
-    if (avatarUrl.startsWith('http')) {
-      return Image.network(
-        avatarUrl,
-        width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
-      );
-    }
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
+        ? avatarUrl
+        : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
 
-    // Якщо це локальний шлях (assets)
-    return Image.asset(
-      avatarUrl,
-      width: size, height: size, fit: BoxFit.cover,
+    return Image.network(
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
     );
   }

@@ -645,8 +645,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(100),
                   child: (friend.avatarUrl != null && friend.avatarUrl!.isNotEmpty)
-                      ? Image.asset(
-                    friend.avatarUrl!,
+                      ? Image.network(
+                    friend.avatarUrl!.startsWith('http')
+                        ? friend.avatarUrl!
+                        : '${ApiConfig.baseUrl}${friend.avatarUrl}',
                     width: 40,
                     height: 40,
                     fit: BoxFit.cover,
@@ -838,8 +840,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(100),
                   child: (friend.avatarUrl != null && friend.avatarUrl!.isNotEmpty)
-                      ? Image.asset(
-                    friend.avatarUrl!,
+                      ? Image.network(
+                    friend.avatarUrl!.startsWith('http')
+                        ? friend.avatarUrl!
+                        : '${ApiConfig.baseUrl}${friend.avatarUrl}',
                     width: 40,
                     height: 40,
                     fit: BoxFit.cover,
@@ -1030,8 +1034,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(100),
                   child: (friend.avatarUrl != null && friend.avatarUrl!.isNotEmpty)
-                      ? Image.asset(
-                    friend.avatarUrl!,
+                      ? Image.network(
+                    friend.avatarUrl!.startsWith('http')
+                        ? friend.avatarUrl!
+                        : '${ApiConfig.baseUrl}${friend.avatarUrl}',
                     width: 40,
                     height: 40,
                     fit: BoxFit.cover,

@@ -5,6 +5,7 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'user_session.dart';
 import 'api_service.dart';
 import 'new_chat_room_screen.dart';
+import 'api_config.dart';
 
 // Створюємо enum для зручного керування станами кнопки дружби
 enum FriendStatus {
@@ -301,9 +302,14 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
               ),
               child: (widget.profile.avatar != null && widget.profile.avatar!.isNotEmpty)
                   ? ClipOval(
-                child: Image.asset(
-                  widget.profile.avatar!,
-                  width: 100, height: 100, fit: BoxFit.cover,
+                child: Image.network(
+                  widget.profile.avatar!.startsWith('http')
+                      ? widget.profile.avatar!
+                      : '${ApiConfig.baseUrl}${widget.profile.avatar}',
+                  width: 100,
+                  height: 100,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),
                 ),
               )
                   : _buildLetterAvatar(widget.profile.nickname, widget.profile.isOnline),

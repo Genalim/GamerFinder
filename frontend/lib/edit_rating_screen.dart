@@ -106,24 +106,36 @@ class _EditRatingScreenState extends State<EditRatingScreen> {
   Widget _buildAvatar(EvaluationModel eval) {
     final String? avatarPath = eval.evaluatorAvatar;
 
+    if (avatarPath != null && avatarPath.isNotEmpty) {
+      final String fullAvatarUrl = avatarPath.startsWith('http')
+          ? avatarPath
+          : '${ApiConfig.baseUrl}${avatarPath.startsWith('/') ? avatarPath : '/$avatarPath'}';
+
+      return ClipOval(
+        child: Image.network(
+          fullAvatarUrl,
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(eval.evaluatorNickname),
+        ),
+      );
+    }
+
+    return _buildLetterAvatar(eval.evaluatorNickname);
+  }
+
+  Widget _buildLetterAvatar(String nickname) {
     return CircleAvatar(
       backgroundColor: const Color(0xFF0F0F1A),
-      // Використовуємо ImageProvider через тернарний оператор
-      backgroundImage: (avatarPath != null && avatarPath.isNotEmpty)
-          ? (avatarPath.startsWith('http')
-          ? NetworkImage(avatarPath)        // Якщо це URL (наприклад, з API)
-          : AssetImage(avatarPath))         // Якщо це локальний assets
-          : null,
-      child: (avatarPath == null || avatarPath.isEmpty)
-          ? Text(
-        eval.evaluatorNickname.isNotEmpty ? eval.evaluatorNickname[0].toUpperCase() : 'U',
+      child: Text(
+        nickname.isNotEmpty ? nickname[0].toUpperCase() : 'U',
         style: const TextStyle(
           fontFamily: 'Love Light',
           fontSize: 20,
           color: Color(0xFF00F5A0),
         ),
-      )
-          : null,
+      ),
     );
   }
 

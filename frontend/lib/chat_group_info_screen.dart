@@ -372,22 +372,18 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
 
   Widget buildAvatar(String? avatarUrl, String initial, double size) {
     if (avatarUrl == null || avatarUrl.isEmpty) {
-      return _buildLetterAvatar(initial, size); // Тепер 2 аргументи!
+      return _buildLetterAvatar(initial, size);
     }
 
-    if (avatarUrl.startsWith('http')) {
-      return Image.network(
-        avatarUrl,
-        width: size, height: size,
-        fit: BoxFit.cover, // <--- Це змушує картинку заповнити весь контейнер
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
-      );
-    }
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
+        ? avatarUrl
+        : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
 
-    return Image.asset(
-      avatarUrl,
-      width: size, height: size,
-      fit: BoxFit.cover, // <--- Це змушує картинку заповнити весь контейнер
+    return Image.network(
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial, size),
     );
   }
@@ -415,6 +411,13 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
     final bool isMeAdmin = _groupData!['is_me_admin'] == true;
     final String? avatarUrl = _groupData!['avatar_url'];
 
+    String? fullGroupAvatarUrl;
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      fullGroupAvatarUrl = avatarUrl.startsWith('http')
+          ? avatarUrl
+          : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
+    }
+
     return GestureDetector(
       onTap: isMeAdmin ? _handleAvatarTap : null,
       child: Container(
@@ -422,9 +425,12 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
         height: 100,
         decoration: const BoxDecoration(shape: BoxShape.circle),
         child: ClipOval(
-          // Якщо є аватарка — просто показуємо її на весь розмір (100x100)
-          child: avatarUrl != null && avatarUrl.isNotEmpty
-              ? Image.network(avatarUrl, fit: BoxFit.cover)
+          child: fullGroupAvatarUrl != null
+              ? Image.network(
+            fullGroupAvatarUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) => _buildAvatarGrid(members.take(4).toList()),
+          )
               : _buildAvatarGrid(members.take(4).toList()),
         ),
       ),

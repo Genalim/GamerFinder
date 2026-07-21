@@ -480,16 +480,17 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return _buildLetterAvatar(initial);
     }
-    if (avatarUrl.startsWith('http')) {
-      return Image.network(
-        avatarUrl,
-        width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
-      );
-    }
-    return Image.asset(
-      avatarUrl,
-      width: size, height: size, fit: BoxFit.cover,
+
+    // Формуємо правильний URL: якщо починається з http — залишаємо, якщо ні — склеюємо з бекендом
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
+        ? avatarUrl
+        : '${ApiConfig.baseUrl}$avatarUrl';
+
+    return Image.network(
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
     );
   }

@@ -195,19 +195,15 @@ class _NewMessageScreenState extends State<NewMessageScreen> {
       return _buildLetterAvatar(initial);
     }
 
-    // Якщо це посилання з сервера (http...)
-    if (avatarUrl.startsWith('http')) {
-      return Image.network(
-        avatarUrl,
-        width: size, height: size, fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
-      );
-    }
+    final String fullAvatarUrl = avatarUrl.startsWith('http')
+        ? avatarUrl
+        : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}';
 
-    // Якщо це шлях до локального файлу (assets/...)
-    return Image.asset(
-      avatarUrl,
-      width: size, height: size, fit: BoxFit.cover,
+    return Image.network(
+      fullAvatarUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(initial),
     );
   }

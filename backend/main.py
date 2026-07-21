@@ -390,6 +390,8 @@ async def ensure_game(data: dict, db: AsyncSession = Depends(get_db)):
 
 @app.post("/upload-avatar")
 async def upload_avatar(file: UploadFile = File(...)):
+    os.makedirs("uploads/avatars", exist_ok=True)
+
     # Створюємо унікальне ім'я файлу (щоб не було колізій)
     file_location = f"uploads/avatars/{file.filename}"
 
@@ -400,13 +402,29 @@ async def upload_avatar(file: UploadFile = File(...)):
     # Повертаємо шлях, за яким фото буде доступне
     return {"url": f"http://127.0.0.1:8000/{file_location}"}
 
+@app.get("/avatars-list")
+async def get_avatars_list():
+    free_dir = "uploads/avatars/free"
+    pro_dir = "uploads/avatars/pro"
+
+    # Створюємо теки на всяк випадок, якщо їх немає
+    os.makedirs(free_dir, exist_ok=True)
+    os.makedirs(pro_dir, exist_ok=True)
+
+    # Формуємо відносні шляхи, наприклад: /uploads/avatars/free/avatar_1.jpg
+    free_paths = [f"/uploads/avatars/free/{f}" for f in os.listdir(free_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))]
+    pro_paths = [f"/uploads/avatars/pro/{f}" for f in os.listdir(pro_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))]
+
+    free_paths.sort()
+    pro_paths.sort()
+
+    return {"free": free_paths, "pro": pro_paths}
+
 @app.get("/games")
 async def get_games(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Game))
     games = result.scalars().all()
     return [{"id": g.id, "name": g.name, "image_url": g.image_url, "genres": g.genres} for g in games]
-
-
 
 @app.get("/find-matches", response_model=List[UserProfileResponse])
 async def find_matches(
@@ -1864,6 +1882,8 @@ async def upload_chat_avatar(
     # Перевірка адміна
     if chat.admin_id != current_user_id:
         raise HTTPException(status_code=403, detail="Only admin can change avatar")
+
+    os.makedirs("uploads/avatars", exist_ok=True)
 
     # 2. Зберігаємо файл
     file_extension = file.filename.split(".")[-1]
