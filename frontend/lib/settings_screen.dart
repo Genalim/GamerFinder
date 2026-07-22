@@ -14,6 +14,7 @@ import 'api_config.dart';
 import 'dart:convert';
 import 'notification_history_screen.dart';
 import 'subscription_screen.dart';
+import 'services/settings_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -24,10 +25,22 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   GamerProfile? _userProfile;
+  bool _matchAlerts = true;
+  bool _chatSound = true;
 
   void initState() {
     super.initState();
     _fetchAndLoadProfile(); // Оновлено: завантажуємо профіль з сервера при старті
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    bool matchAlerts = await SettingsService.isMatchAlertsEnabled();
+    bool chatSound = await SettingsService.isChatSoundEnabled();
+    setState(() {
+      _matchAlerts = matchAlerts;
+      _chatSound = chatSound;
+    });
   }
 
   Future<void> _fetchAndLoadProfile() async {
@@ -343,26 +356,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SectionHeader(title: 'App Preferences'),
           Card(
-            color: cardColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              children: [
-                SwitchListTile(
-                  activeColor: accentColor,
-                  title: const Text('Desktop Match Alerts', style: TextStyle(color: Colors.white)),
-                  value: true,
-                  onChanged: (bool value) {},
-                ),
-                const Divider(color: Color(0xFF2B2B3B), height: 1),
-                SwitchListTile(
-                  activeColor: accentColor,
-                  title: const Text('Chat Sounds', style: TextStyle(color: Colors.white)),
-                  value: true,
-                  onChanged: (bool value) {},
-                ),
-              ],
+              color: cardColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    activeColor: accentColor,
+                    title: const Text('Desktop Match Alerts', style: TextStyle(color: Colors.white)),
+                    value: _matchAlerts, // <--- Змінено з true
+                    onChanged: (bool value) async {
+                      setState(() => _matchAlerts = value);
+                      await SettingsService.setMatchAlertsEnabled(value); // <--- Збереження
+                    },
+                  ),
+                  const Divider(color: Color(0xFF2B2B3B), height: 1),
+                  SwitchListTile(
+                    activeColor: accentColor,
+                    title: const Text('Chat Sounds', style: TextStyle(color: Colors.white)),
+                    value: _chatSound, // <--- Змінено з true
+                    onChanged: (bool value) async {
+                      setState(() => _chatSound = value);
+                      await SettingsService.setChatSoundEnabled(value); // <--- Збереження
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 20),
 
           const SectionHeader(title: 'Subscription'),

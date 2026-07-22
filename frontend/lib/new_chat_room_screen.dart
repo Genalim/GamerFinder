@@ -16,6 +16,8 @@ import 'chats_screen.dart';
 import 'chat_forward_screen.dart';
 import 'package:flutter/services.dart';
 import 'models.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String friendName;
@@ -612,6 +614,147 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       Scrollable.ensureVisible(key.currentContext!, duration: const Duration(milliseconds: 300), alignment: 0.5);
     }
   }
+  //Add Files Part
+  // Метод відкриття меню вибору (Фото чи Файл)
+  void _showAttachmentOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF181826),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Attach to message",
+                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Poppins'),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Color(0xFF00F5A0)),
+                title: const Text("Photo from Gallery", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndSendImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF00F5A0)),
+                title: const Text("Take a Photo", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndSendImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.insert_drive_file, color: Color(0xFF00F5A0)),
+                title: const Text("Document / File", style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndSendFile();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndSendImage(ImageSource source) async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: source, imageQuality: 70);
+
+    if (image != null) {
+      // Перевіряємо розмір фото (1 МБ = 1024 * 1024 байт)
+      final int bytesLength = await image.length();
+      if (bytesLength > 1 * 1024 * 1024) {
+        _showErrorSnackBar("File is too large. Max size is 1MB.");
+        return;
+      }
+      await _uploadAndSendFile(image.path, isImage: true);
+    }
+  }
+
+  Future<void> _pickAndSendFile() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(withData: true); // збираємо байти для перевірки
+
+    if (result != null && result.files.single.path != null) {
+      final file = result.files.single;
+
+      // Перевіряємо розмір файлу (1 МБ)
+      if (file.size > 1 * 1024 * 1024) {
+        _showErrorSnackBar("File is too large. Max size is 1MB.");
+        return;
+      }
+
+      await _uploadAndSendFile(file.path!, isImage: false);
+    }
+  }
+
+  // Допоміжний метод для красивого сповіщення про помилку
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _uploadAndSendFile(String filePath, {required bool isImage}) async {
+    if (_activeChatId == null) return;
+
+    // Показуємо індикатор завантаження
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00F5A0))),
+    );
+
+    try {
+      final uri = Uri.parse('${ApiConfig.baseUrl}/chats/${_activeChatId}/upload');
+      var request = http.MultipartRequest('POST', uri);
+
+      request.headers.addAll(await ApiService.getHeaders());
+      request.files.add(await http.MultipartFile.fromPath('file', filePath));
+
+      var streamedResponse = await request.send();
+      var response = await http.Response.fromStream(streamedResponse);
+
+      if (mounted) Navigator.pop(context); // Ховаємо індикатор
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final String fileUrl = data['file_url']; // URL, який повернув сервер
+
+        // Формуємо текст повідомлення або прев'ю (наприклад, посилання на файл)
+        final String myId = UserSession().currentUser?.id.toString() ?? "";
+        final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl]";
+
+        // Додаємо в локальний UI та відправляємо через сокет
+        _addNewMessageToUi({
+          'content': content,
+          'sender_id': myId,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        });
+
+        ChatManager().sendMessage(_activeChatId!, myId, content);
+      } else {
+        debugPrint("Помилка завантаження файлу: ${response.statusCode}");
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint("Виняток при завантаженні файлу: $e");
+    }
+  }
+
+  //End Add Of files/
 
   @override
   Widget build(BuildContext context) {
@@ -946,7 +1089,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Padding(padding: EdgeInsets.only(bottom: 8), child: FigmaAttachIcon()),
+              GestureDetector(
+                onTap: _showAttachmentOptions,
+                child: const Padding(padding: EdgeInsets.only(bottom: 8), child: FigmaAttachIcon()),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: ConstrainedBox(
@@ -1366,13 +1512,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
             children: [
               replyBlock, // Доданий блок відповіді
               forwardBlock,
-              _buildHighlightedText(
-                widget.message.content,
-                widget.searchQuery,
-                widget.currentMatchIndex,
-                widget.messageIndex,
-                widget.foundMatches,
-              ),
+              _buildMessageContent(),
             ],
           ),
           timeAndStatus,
@@ -1576,6 +1716,71 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         children: spans,
         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
       ),
+    );
+  }
+
+
+  Widget _buildMessageContent() {
+    final String rawContent = widget.message.content;
+    final String cleanText = getCleanContent(rawContent);
+
+    // 1. Якщо це картинка
+    if (cleanText.startsWith('[IMAGE:') && cleanText.endsWith(']')) {
+      final String imageUrl = cleanText.substring(7, cleanText.length - 1);
+      final String fullUrl = imageUrl.startsWith('http')
+          ? imageUrl
+          : '${ApiConfig.baseUrl}${imageUrl.startsWith('/') ? imageUrl : '/$imageUrl'}';
+
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          fullUrl,
+          width: 200,
+          height: 200,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Text(
+            "[Помилка завантаження фото]",
+            style: TextStyle(color: widget.message.isMe ? Colors.redAccent : Colors.red, fontSize: 12),
+          ),
+        ),
+      );
+    }
+
+    // 2. Якщо це файл
+    if (cleanText.startsWith('[FILE:') && cleanText.endsWith(']')) {
+      final String fileUrl = cleanText.substring(6, cleanText.length - 1);
+      final String fileName = fileUrl.split('/').last;
+      final Color baseTextColor = widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white;
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.insert_drive_file, color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), size: 24),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              "File: $fileName",
+              style: TextStyle(
+                color: baseTextColor,
+                decoration: TextDecoration.underline,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                fontFamily: 'Inter',
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 3. Якщо це звичайний текст — викликаємо твій метод пошуку/підсвічування
+    return _buildHighlightedText(
+      rawContent,
+      widget.searchQuery,
+      widget.currentMatchIndex,
+      widget.messageIndex,
+      widget.foundMatches,
     );
   }
 

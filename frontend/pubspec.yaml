@@ -40,11 +40,14 @@ dependencies:
   http: ^1.6.0
   flutter_svg: ^2.3.0
   image_picker: ^1.2.2
+  file_picker: ^8.1.4
   image_cropper: ^12.2.1
   flutter_image_compress: ^2.0.0
   url_launcher: ^6.3.2
   auto_size_text: ^3.0.0
   intl: ^0.20.3
+
+  audioplayers: ^6.0.0
 
 dev_dependencies:
   flutter_test:
@@ -68,10 +71,9 @@ flutter:
     - assets/images/game_images/
     - assets/images/Platforms/
     - assets/images/PlayStyles/
-    - assets/avatars/free/
-    - assets/avatars/pro/
     - assets/ChatBackground/
     - assets/users.json
+    - assets/sounds/
 
   #Fonts connect
   fonts:

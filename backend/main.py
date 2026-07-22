@@ -26,6 +26,8 @@ from fastapi import Depends
 import uuid
 from pydantic import BaseModel
 
+from fastapi import APIRouter
+
 from schemas import (
     UserCreate,
     LoginRequest,
@@ -1468,12 +1470,11 @@ async def get_or_create_chat(
 @app.get("/messages/{chat_id}")
 async def get_messages(
         chat_id: uuid.UUID,
-        limit: int = Query(30, ge=1, le=100),    # Додаємо ліміт (за замовчуванням 30)
-        offset: int = Query(0, ge=0),            # Додаємо зсув
+        limit: int = Query(30, ge=1, le=100),
+        offset: int = Query(0, ge=0),
         db: AsyncSession = Depends(get_db),
         current_user_id: Optional[int] = Depends(get_current_user_id)
 ):
-    # 1. Формуємо підзапит для лайків (залишаємо як було)
     if current_user_id:
         is_liked_subquery = select(MessageReaction.id).filter(
             and_(
@@ -1484,22 +1485,19 @@ async def get_messages(
     else:
         is_liked_subquery = False
 
-    # 2. Основний запит з LIMIT та OFFSET
-    # ВАЖЛИВО: для пагінації ми беремо від найновіших (desc), а потім реверсуємо на фронті,
-    # або сортуємо asc, але робимо зсув від кінця.
-    # Найпростіше для чату: брати останні N повідомлень.
-
-    # Спочатку рахуємо загальну кількість для офсету або просто сортуємо
+    # Додаємо join з таблицею User, щоб отримати нікнейм відправника
     stmt = (
         select(
             Message,
+            User.nickname.label("sender_nickname"), # <--- Додаємо вибірку нікнейму
             func.count(MessageReaction.id).label("likes_count"),
             is_liked_subquery.label("is_liked_by_me")
         )
+        .outerjoin(User, Message.sender_id == User.id) # <--- З'єднуємо за sender_id
         .outerjoin(MessageReaction, Message.id == MessageReaction.message_id)
         .filter(Message.chat_id == chat_id)
-        .group_by(Message.id)
-        .order_by(Message.created_at.desc()) # Беремо останні повідомлення
+        .group_by(Message.id, User.nickname) # <--- Групуємо також за нікнеймом
+        .order_by(Message.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -1507,18 +1505,18 @@ async def get_messages(
     result = await db.execute(stmt)
     rows = result.all()
 
-    # Оскільки ми брали desc(), тепер список іде від нових до старих.
-    # Фронтенд очікує старі -> нові, тому розвертаємо список:
     rows = list(reversed(rows))
 
     messages_with_likes = []
     for row in rows:
         msg = row[0]
-        count = row[1]
-        is_liked = row[2]
+        sender_nickname = row[1] # <--- Дістаємо нікнейм з результату запиту
+        count = row[2]
+        is_liked = row[3]
 
         msg_data = msg.__dict__.copy()
         msg_data.pop('_sa_instance_state', None)
+        msg_data['sender_nickname'] = sender_nickname # <--- Записуємо у вихідний словник для Flutter
         msg_data['likes_count'] = count
         msg_data['is_liked_by_me'] = bool(is_liked)
         msg_data['chat_id'] = str(msg_data['chat_id'])
@@ -2110,11 +2108,39 @@ async def activate_pro(
 
     return {"status": "success", "is_pro": user.is_pro, "expiry_date": user.pro_expiry_date.isoformat()}
 
+# File attachment
+router = APIRouter()
 
+@router.post("/chats/{chat_id}/upload")
+async def upload_chat_file(
+        chat_id: str,
+        file: UploadFile = File(...),
+        user = Depends(get_current_user)
+):
+    # Обмежуємо розмір до 1 МБ (1 * 1024 * 1024 байт)
+    MAX_FILE_SIZE = 1 * 1024 * 1024
 
+    # Читаємо вміст для перевірки розміру
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File size exceeds the 1MB limit."
+        )
+
+    os.makedirs("uploads/chat_files", exist_ok=True)
+
+    file_extension = file.filename.split(".")[-1] if "." in file.filename else "bin"
+    unique_filename = f"{uuid.uuid4()}.{file_extension}"
+    file_location = f"uploads/chat_files/{unique_filename}"
+
+    # Записуємо збережені байти на диск
+    with open(file_location, "wb") as buffer:
+        buffer.write(contents)
+
+    return {"file_url": f"/uploads/chat_files/{unique_filename}"}
 
 app = socketio.ASGIApp(sio, app)
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

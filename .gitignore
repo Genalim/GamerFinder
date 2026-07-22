@@ -1,0 +1,38 @@
+# --- Flutter / Dart ---
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# --- IDE / Editor files (VS Code, Android Studio, IntelliJ) ---
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+.shelf/
+
+# --- Python / Backend / Virtual Environment ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+ENV/
+env/
+.env
+
+# --- Uploads & User Files (Щоб файли з чату та аватарки не йшли в гіт) ---
+backend/uploads/
+uploads/
+*/uploads/
+
+# --- OS generated files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini

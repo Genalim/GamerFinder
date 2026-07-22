@@ -215,17 +215,36 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
           final String myId = UserSession().currentUser?.id.toString() ?? "";
           final String myNickname = UserSession().currentUser?.nickname ?? "You";
 
-          final newMessages = list.map((item) => {
-            'id': item['id'].toString(),
-            'content': item['content'],
-            'sender_id': item['sender_id'].toString(),
-            'sender_nickname': item['sender_nickname'] ?? (item['sender_id'].toString() == myId ? myNickname : "Member"),
-            'isMe': item['sender_id'].toString() == myId,
-            'time': _parseDateTime(item['created_at']),
-            'status': item['status'] ?? 'sent',
-            'reply_to_id': item['reply_to_id'],
-            'likes_count': item['likes_count'] ?? 0,
-            'is_liked_by_me': item['is_liked_by_me'] ?? false,
+          final newMessages = list.map((item) {
+            final String senderId = item['sender_id'].toString();
+            final String myId = UserSession().currentUser?.id.toString() ?? "";
+            final String myNickname = UserSession().currentUser?.nickname ?? "You";
+
+            // Пріоритет:
+            // 1. sender_nickname від бекенду
+            // 2. якщо це ми — наш нікнейм з сесії
+            // 3. якщо це хтось інший — пробуємо взяти з item або ставимо fallback "User"
+            String nickname = item['sender_nickname'] ?? '';
+            if (nickname.isEmpty) {
+              if (senderId == myId) {
+                nickname = myNickname;
+              } else {
+                nickname = item['sender_name'] ?? "User"; // Змінюємо дефолт з "Member" на "User" або ім'я
+              }
+            }
+
+            return {
+              'id': item['id'].toString(),
+              'content': item['content'],
+              'sender_id': senderId,
+              'sender_nickname': nickname, // <--- Використовуємо реальний нік
+              'isMe': senderId == myId,
+              'time': _parseDateTime(item['created_at']),
+              'status': item['status'] ?? 'sent',
+              'reply_to_id': item['reply_to_id'],
+              'likes_count': item['likes_count'] ?? 0,
+              'is_liked_by_me': item['is_liked_by_me'] ?? false,
+            };
           }).toList();
 
           setState(() {

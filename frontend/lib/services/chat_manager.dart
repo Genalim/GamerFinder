@@ -1,6 +1,9 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import '../api_config.dart'; // Імпортуємо твій конфіг
+import '../api_config.dart';
 import 'package:flutter/foundation.dart';
+import 'sound_service.dart';
+import '../user_session.dart';
+import 'settings_service.dart';
 
 class ChatManager {
   static final ChatManager _instance = ChatManager._internal();
@@ -14,9 +17,7 @@ class ChatManager {
 
   IO.Socket? _socket;
 
-  // Стан підключення
   bool isConnected = false;
-  // Колбек для оновлення UI
   Function(bool)? onStatusChanged;
 
   IO.Socket? get socket => _socket;
@@ -26,35 +27,53 @@ class ChatManager {
 
     print('DEBUG: Ініціалізація сокета для користувача: $userId');
 
-    // Передаємо параметри у вигляді єдиного коректного об'єкта підключення
     _socket = IO.io(ApiConfig.baseUrl, <String, dynamic>{
       'transports': ['websocket'],
       'path': '/socket.io/',
       'autoConnect': false,
-      // Передаємо виключно через auth, оскільки бекенд опрацьовує його першим
       'auth': {'user_id': userId.toString()},
       'connectTimeout': 10000,
       'reconnection': true,
       'reconnectionAttempts': 5,
     });
 
-    // Підключення
     _socket!.onConnect((_) {
       print('DEBUG: Сокет підключено!');
       isConnected = true;
       if (onStatusChanged != null) onStatusChanged!(true);
     });
 
-    // Відключення
     _socket!.onDisconnect((reason) {
       print('DEBUG: Сокет відключено: $reason');
       isConnected = false;
       if (onStatusChanged != null) onStatusChanged!(false);
     });
 
-    // Помилки
     _socket!.onConnectError((err) => print('DEBUG: Помилка підключення: $err'));
     _socket!.onError((err) => print('DEBUG: Помилка сокета: $err'));
+
+    // --- БЕЗПЕЧНИЙ ВИКЛИК ЗВУКІВ БЕЗ ASYNC/AWAIT УНУТРІ ---
+    _socket!.on('new_message', (data) {
+      final String senderId = data['sender_id']?.toString() ?? "";
+      final String myId = UserSession().currentUser?.id.toString() ?? "";
+
+      if (senderId != myId && senderId.isNotEmpty) {
+        SettingsService.isChatSoundEnabled().then((isEnabled) {
+          if (isEnabled) {
+            SoundService.playIncomingMessage();
+          }
+        });
+      }
+    });
+
+    _socket!.on('new_notification', (data) {
+      SettingsService.isMatchAlertsEnabled().then((isEnabled) {
+        if (isEnabled) {
+          SoundService.playNotification();
+        }
+      });
+    });
+    // -----------------------------------------------------
 
     _socket!.onAny((event, data) {
       print('DEBUG: ВІД СЕРВЕРА ПРИЙШЛА ПОДІЯ: "$event" | Дані: $data');
@@ -64,12 +83,10 @@ class ChatManager {
   }
 
   void joinChat(String chatId) {
-    // Використовуй ?. для безпечного виклику
     socket?.emit('join_chat', {'chat_id': chatId});
   }
 
   void sendMessage(String chatId, String senderId, String content, {String? replyTo}) {
-    // Використовуй ?.
     socket?.emit('send_message', {
       'chat_id': chatId,
       'sender_id': senderId,
@@ -78,7 +95,6 @@ class ChatManager {
     });
   }
 
-  //Count messagre for chat in navigation
   Function()? onUnreadChanged;
 
   void setUnreadCount(int count) {
