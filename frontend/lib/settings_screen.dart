@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'notification_history_screen.dart';
 import 'subscription_screen.dart';
 import 'services/settings_service.dart';
+import 'profile_setup_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -411,6 +412,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Log out', style: TextStyle(color: Colors.white)),
             onTap: () async {
               await UserSession.logout();
+
+              // ДОДАЄМО СКИДАННЯ МЕНЕДЖЕРА РЕЄСТРАЦІЇ
+              ProfileSetupManager.instance.reset();
+
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const SignInScreen()),
                     (route) => false,

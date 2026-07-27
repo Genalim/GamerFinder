@@ -201,6 +201,9 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
         // РАХУЄМО СУМУ НЕПРОЧИТАНИХ
         int totalUnread = newChats.fold(0, (sum, item) => sum + item.unreadCount);
         ChatManager().setUnreadCount(totalUnread);
+        if (ChatManager().onUnreadChanged != null) {
+          ChatManager().onUnreadChanged!();
+        }
 
         if (mounted) {
           setState(() {
@@ -233,6 +236,7 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
               chatId: chatOrName.id,
               participantNames: chatOrName.userInitials, // Ініціали, що приходять з бекенду
               onBack: _closeAndRefresh, // Зберігаємо метод оновлення
+              //unreadCount: chatOrName.unreadCount,
             ),
           ),
         );
@@ -246,6 +250,7 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
               chatId: chatOrName.id,
               friendId: chatOrName.recipientId?.toString(),
               onBack: _closeAndRefresh, // Зберігаємо метод оновлення
+              unreadCount: chatOrName.unreadCount,
             ),
           ),
         );
@@ -258,6 +263,7 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
           builder: (context) => ChatRoomScreen(
             friendName: chatOrName,
             onBack: _closeAndRefresh, // Зберігаємо метод оновлення[cite: 3]
+            unreadCount: 0,
           ),
         ),
       );

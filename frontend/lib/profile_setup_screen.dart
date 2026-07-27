@@ -217,11 +217,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           });
 
           // Кешуємо мережеві картинки для плавності
-          for (var url in _freeAvatars) {
-            precacheImage(NetworkImage(url), context);
+          for (var path in _freeAvatars) {
+            final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
+            precacheImage(NetworkImage(fullAvatarUrl), context);
           }
-          for (var url in _proAvatars) {
-            precacheImage(NetworkImage(url), context);
+          for (var path in _proAvatars) {
+            final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
+            precacheImage(NetworkImage(fullAvatarUrl), context);
           }
         }
       }
@@ -242,10 +244,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Future<void> _pickImage(ImageSource source) async {
     final XFile? pickedFile = await _picker.pickImage(source: source);
     if (pickedFile != null) {
-      // 1. Одразу після вибору запускаємо кропер
       final CroppedFile? croppedFile = await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1), // Робимо квадрат
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
         uiSettings: [
           AndroidUiSettings(
             toolbarTitle: 'Crop Avatar',
@@ -260,11 +261,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       if (croppedFile != null) {
         setState(() {
-          // 2. Тепер зберігаємо шлях до вже обрізаного файлу
           _imageFile = File(croppedFile.path);
-          _selectedAvatarPath = null; // Стандартну аватарку скидаємо
+          _selectedAvatarPath = null;
         });
-        Navigator.pop(context); // Закриваємо модалку після вибору
+        // ПРИБРАНО Navigator.pop(context); — кропер сам закривається і повертає результат сюди!
       }
     }
   }

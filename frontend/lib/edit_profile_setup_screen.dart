@@ -287,11 +287,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _isLoadingAssets = false;
           });
 
-          for (var url in _freeAvatars) {
-            precacheImage(NetworkImage('${url.startsWith('http') ? '' : ApiConfig.baseUrl}$url'), context);
+          for (var path in _freeAvatars) {
+            final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
+            precacheImage(NetworkImage(fullAvatarUrl), context);
           }
-          for (var url in _proAvatars) {
-            precacheImage(NetworkImage('${url.startsWith('http') ? '' : ApiConfig.baseUrl}$url'), context);
+          for (var path in _proAvatars) {
+            final String fullAvatarUrl = path.startsWith('http') ? path : '${ApiConfig.baseUrl}$path';
+            precacheImage(NetworkImage(fullAvatarUrl), context);
           }
         }
       }
@@ -332,7 +334,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _imageFile = File(croppedFile.path);
           _selectedAvatarPath = null;
         });
-        Navigator.pop(context);
+        // Navigator.pop(context); прибрано, щоб не викидувало з екрана редагування профілю
       }
     }
   }

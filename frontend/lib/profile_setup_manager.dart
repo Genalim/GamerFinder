@@ -100,18 +100,23 @@ class ProfileSetupManager {
   // Метод для повного скидання даних
   void reset() {
     savedGameIds.clear();
+    selectedLanguages.clear();
+    timezoneOffset = DateTime
+        .now()
+        .timeZoneOffset
+        .inHours;
     savedGamesList.clear();
     selectedGames.clear();
     selectedPlatforms.clear();
     selectedPlayStyles.clear();
     selectedTimes.clear();
-    timezoneOffset = DateTime.now().timeZoneOffset.inHours; // Оновлюємо пояс при ресеті
+    useVoiceChat = false;
     nickname = '';
     email = '';
     password = '';
     selectedAvatarPath = null;
-    connectedAccounts.clear();
     isOnline = true;
     isPro = false;
+    connectedAccounts.clear();
   }
 }

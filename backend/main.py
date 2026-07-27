@@ -5,6 +5,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, update, or_, func, desc, case, text
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import Query, Body
@@ -401,8 +402,8 @@ async def upload_avatar(file: UploadFile = File(...)):
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Повертаємо шлях, за яким фото буде доступне
-    return {"url": f"http://127.0.0.1:8000/{file_location}"}
+    # ЗМІНЮЄМО ТУТ: повертаємо лише відносний шлях зі слешем на початку
+    return {"url": f"/{file_location}"}
 
 @app.get("/avatars-list")
 async def get_avatars_list():
@@ -1470,74 +1471,244 @@ async def get_or_create_chat(
 @app.get("/messages/{chat_id}")
 async def get_messages(
         chat_id: uuid.UUID,
-        limit: int = Query(30, ge=1, le=100),
+        limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0),
+        around_message_id: Optional[uuid.UUID] = Query(None),
+        before_message_id: Optional[uuid.UUID] = Query(None), # Для довантаження старіших (вгору)
+        after_message_id: Optional[uuid.UUID] = Query(None),  # Для довантаження новіших (вниз)
         db: AsyncSession = Depends(get_db),
         current_user_id: Optional[int] = Depends(get_current_user_id)
 ):
-    if current_user_id:
-        is_liked_subquery = select(MessageReaction.id).filter(
+    likes_count_subq = (
+        select(func.count(MessageReaction.id))
+        .filter(MessageReaction.message_id == Message.id)
+        .correlate(Message)
+        .scalar_subquery()
+    )
+
+    is_liked_subquery = (
+        select(MessageReaction.id)
+        .filter(
             and_(
                 MessageReaction.message_id == Message.id,
                 MessageReaction.user_id == current_user_id
             )
-        ).correlate(Message).exists()
-    else:
-        is_liked_subquery = False
+        )
+        .correlate(Message)
+        .exists()
+    ) if current_user_id else False
 
-    # Додаємо join з таблицею User, щоб отримати нікнейм відправника
+    target_message_ids = []
+
+    # 1. Якщо запит йде НАСТУПНИХ (новіших) повідомлень вниз
+    if after_message_id:
+        anchor_res = await db.execute(select(Message.created_at).filter(Message.id == after_message_id))
+        anchor_time = anchor_res.scalar()
+        if anchor_time:
+            stmt = (
+                select(Message.id)
+                .filter(Message.chat_id == chat_id, Message.created_at > anchor_time)
+                .order_by(Message.created_at.asc())
+                .limit(limit)
+            )
+            res = await db.execute(stmt)
+            target_message_ids = [row[0] for row in res.all()]
+
+    # 2. Якщо запит йде СТАРІШИХ повідомлень вгору (пагінація)
+    elif before_message_id:
+        anchor_res = await db.execute(select(Message.created_at).filter(Message.id == before_message_id))
+        anchor_time = anchor_res.scalar()
+        if anchor_time:
+            stmt = (
+                select(Message.id)
+                .filter(Message.chat_id == chat_id, Message.created_at < anchor_time)
+                .order_by(Message.created_at.desc())
+                .limit(limit)
+            )
+            res = await db.execute(stmt)
+            target_message_ids = [row[0] for row in res.all()][::-1]
+
+    # 3. Первинний вхід або цільовий перехід навколо конкретного повідомлення
+    else:
+        if around_message_id:
+            # Якщо чомусь треба відкрити конкретне повідомлення (наприклад, з пошуку)
+            anchor_res = await db.execute(select(Message.created_at).filter(Message.id == around_message_id))
+            target_anchor_time = anchor_res.scalar()
+            if target_anchor_time:
+                half_limit = limit // 2
+                sub_older = (
+                    select(Message.id)
+                    .filter(Message.chat_id == chat_id, Message.created_at < target_anchor_time)
+                    .order_by(Message.created_at.desc())
+                    .limit(half_limit)
+                    .subquery()
+                )
+                older_stmt = select(sub_older.c.id).order_by(select(Message.created_at).filter(Message.id == sub_older.c.id).scalar_subquery().asc())
+                older_res = await db.execute(older_stmt)
+                older_ids = [row[0] for row in older_res.all()]
+
+                anchor_stmt = select(Message.id).filter(Message.chat_id == chat_id, Message.created_at == target_anchor_time).limit(1)
+                anchor_res = await db.execute(anchor_stmt)
+                anchor_id = anchor_res.scalar_one_or_none()
+
+                remaining_limit = limit - len(older_ids) - (1 if anchor_id else 0)
+                newer_stmt = (
+                    select(Message.id)
+                    .filter(Message.chat_id == chat_id, Message.created_at > target_anchor_time)
+                    .order_by(Message.created_at.asc())
+                    .limit(max(0, remaining_limit))
+                )
+                newer_res = await db.execute(newer_stmt)
+                newer_ids = [row[0] for row in newer_res.all()]
+
+                raw_ids = older_ids + ([anchor_id] if anchor_id else []) + newer_ids
+                target_message_ids = list(dict.fromkeys(raw_ids))
+
+        # Стандартний вхід у чат (offset == 0 без аругументів): просто віддаємо останні 50 штук з кінця
+        if not target_message_ids:
+            standard_stmt = (
+                select(Message.id)
+                .filter(Message.chat_id == chat_id)
+                .order_by(Message.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            std_res = await db.execute(standard_stmt)
+            target_message_ids = [row[0] for row in std_res.all()][::-1]
+
+    if not target_message_ids:
+        return []
+
     stmt = (
         select(
             Message,
-            User.nickname.label("sender_nickname"), # <--- Додаємо вибірку нікнейму
-            func.count(MessageReaction.id).label("likes_count"),
+            User.nickname.label("sender_nickname"),
+            likes_count_subq.label("likes_count"),
             is_liked_subquery.label("is_liked_by_me")
         )
-        .outerjoin(User, Message.sender_id == User.id) # <--- З'єднуємо за sender_id
-        .outerjoin(MessageReaction, Message.id == MessageReaction.message_id)
-        .filter(Message.chat_id == chat_id)
-        .group_by(Message.id, User.nickname) # <--- Групуємо також за нікнеймом
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+        .outerjoin(User, Message.sender_id == User.id)
+        .filter(Message.id.in_(target_message_ids))
     )
 
     result = await db.execute(stmt)
     rows = result.all()
 
-    rows = list(reversed(rows))
-
-    messages_with_likes = []
+    messages_map = {}
     for row in rows:
         msg = row[0]
-        sender_nickname = row[1] # <--- Дістаємо нікнейм з результату запиту
+        sender_nickname = row[1]
         count = row[2]
         is_liked = row[3]
 
         msg_data = msg.__dict__.copy()
         msg_data.pop('_sa_instance_state', None)
-        msg_data['sender_nickname'] = sender_nickname # <--- Записуємо у вихідний словник для Flutter
-        msg_data['likes_count'] = count
+        msg_data['sender_nickname'] = sender_nickname
+        msg_data['likes_count'] = count or 0
         msg_data['is_liked_by_me'] = bool(is_liked)
         msg_data['chat_id'] = str(msg_data['chat_id'])
         msg_data['id'] = str(msg_data['id'])
         msg_data['sender_id'] = str(msg_data['sender_id'])
-        messages_with_likes.append(msg_data)
 
-    return messages_with_likes
+        messages_map[msg_data['id']] = msg_data
 
-@app.patch("/messages/read/{chat_id}")
-async def mark_messages_as_read(chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user_id: int = Depends(get_current_user_id)):
-    # Оновлюємо всі повідомлення в чаті, які відправлені НЕ НАМИ і ще не прочитані
-    await db.execute(
+    ordered_messages = [messages_map[str(msg_id)] for msg_id in target_message_ids if str(msg_id) in messages_map]
+
+    print(f"\n[GET_MESSAGES DEBUG] Віддаємо клієнту {len(ordered_messages)} повідомлень:")
+    for m in ordered_messages:
+        # Можеш підставити текст своїх проблемних повідомлень, наприклад від 843 до 845
+        if m['content'] in ['843', '844', '845', '846', '847', '841', '840', '842']:
+            print(f"   🔍 У БД для софт-тексту '{m['content']}' (ID: {m['id']}) стоїть статус: [ {m['status']} ]")
+
+    return ordered_messages
+
+@app.patch("/messages/read-up-to/{chat_id}")
+async def mark_messages_up_to_as_read(
+        chat_id: uuid.UUID,
+        last_message_id: uuid.UUID,  # <-- Передається як query параметр з фронта
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    print(f"\n[BACKEND DETECTIVE] ---> РЕКВЕСТ read-up-to <---")
+    print(f"Chat ID: {chat_id}, Last Msg ID: {last_message_id}, Юзер, що читає (Мій ID): {current_user_id}")
+
+    # 1. Шукаємо цільове повідомлення
+    target_msg = await db.get(Message, last_message_id)
+    if not target_msg:
+        print(f"[BACKEND DETECTIVE] ❌ ПОМИЛКА: Повідомлення {last_message_id} не знайдено в БД!")
+        return {"status": "error", "detail": "Message not found"}
+
+    print(f"[BACKEND DETECTIVE] 🎯 Цільове повідомлення знайдено! Створено: {target_msg.created_at}")
+
+    # 2. Формуємо запит на оновлення всіх попередніх повідомлень
+    stmt = (
         update(Message)
-        .where(Message.chat_id == chat_id, Message.sender_id != current_user_id, Message.status != "read")
+        .where(
+            Message.chat_id == chat_id,
+            Message.sender_id != current_user_id,
+            Message.status != "read",
+            Message.created_at <= target_msg.created_at
+        )
         .values(status="read")
     )
-    await db.commit()
 
-    # Відправляємо сокет-подію іншому учаснику, що повідомлення прочитані
-    await sio.emit('messages_read', {'chat_id': str(chat_id)}, room=str(chat_id))
+    # 3. Виконуємо і дивимось, скільки реально рядків зачепило
+    result = await db.execute(stmt)
+    print(f"[BACKEND DETECTIVE] 📊 SQLAlchemy звітує: оновлено рядків (rowcount) = {result.rowcount}")
+
+    # 4. Фіксуємо транзакцію
+    await db.commit()
+    print("[BACKEND DETECTIVE] ✅ Транзакція (commit) успішна!")
+
+    # 5. Контрольна перевірка напряму з БД: чи реально змінився статус?
+    await db.refresh(target_msg)
+    print(f"[BACKEND DETECTIVE] 🔍 КОНТРОЛЬ: Статус цільового повідомлення після commit -> {target_msg.status}")
+
+    # 6. Відправляємо сокет
+    await sio.emit('messages_read', {'chat_id': str(chat_id), 'last_read_id': str(last_message_id)}, room=str(chat_id))
+    print("[BACKEND DETECTIVE] 🚀 Сокет 'messages_read' відправлено!")
+
+    return {"status": "ok", "updated_count": result.rowcount}
+
+@app.patch("/messages/{message_id}/read")
+async def mark_single_message_as_read(
+        message_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    print(f"\n[BACKEND DETECTIVE] ---> РЕКВЕСТ single-read <---")
+    print(f"Message ID: {message_id}, Юзер, що читає (Мій ID): {current_user_id}")
+
+    msg = await db.get(Message, message_id)
+    if not msg:
+        print(f"[BACKEND DETECTIVE] ❌ ПОМИЛКА: Повідомлення {message_id} не знайдено в БД!")
+        return {"status": "error", "detail": "Message not found"}
+
+    print(f"[BACKEND DETECTIVE] 🎯 Знайдено! Відправник повідомлення (Sender ID): {msg.sender_id}, Поточний статус в БД: {msg.status}")
+
+    # Перевіряємо логіку дозволу на оновлення
+    if msg.sender_id != current_user_id and msg.status != "read":
+        print("[BACKEND DETECTIVE] 🛠️ Умова дозволяє оновлення. Пробуємо змінити на 'read'...")
+
+        msg.status = "read"
+        db.add(msg) # Явно додаємо в сесію для відстеження
+        await db.commit()
+
+        # Витягуємо свіжі дані прямо з бази, щоб переконатися, що запис ліг
+        await db.refresh(msg)
+        print(f"[BACKEND DETECTIVE] ✅ Успішний commit! Новий статус в базі: {msg.status}")
+
+        await sio.emit('messages_read', {
+            'chat_id': str(msg.chat_id),
+            'last_read_id': str(message_id)
+        }, room=str(msg.chat_id))
+        print("[BACKEND DETECTIVE] 🚀 Сокет 'messages_read' відправлено!")
+    else:
+        print("[BACKEND DETECTIVE] ⚠️ ПРОПУСК ОНОВЛЕННЯ. Причини:")
+        if msg.sender_id == current_user_id:
+            print(f"   -> Це повідомлення написав я сам (мій ID = {current_user_id} == Sender ID = {msg.sender_id})")
+        if msg.status == "read":
+            print(f"   -> В базі статус ВЖЕ 'read'")
+
     return {"status": "ok"}
 
 #Chat screen (chat list)
@@ -1569,16 +1740,25 @@ async def get_chats(
         )
         last_msg = msg_res.scalar_one_or_none()
 
+        # --- ДОДАЄМО ПІДРАХУНОК НЕПРОЧИТАНИХ ДЛЯ ЦЬОГО ЧАТУ ---
+        unread_res = await db.execute(
+            select(func.count(Message.id)).where(
+                Message.chat_id == chat.id,
+                Message.sender_id != current_user.id,
+                Message.status != "read" # або Message.is_read == False залежно від вашої моделі
+            )
+        )
+        unread_count = unread_res.scalar() or 0
+        # ------------------------------------------------------
+
         # Отримуємо ВСІХ учасників цього чату
         members_res = await db.execute(
             select(User).join(ChatMember).where(ChatMember.chat_id == chat.id)
         )
         all_members = members_res.scalars().all()
 
-        # Фільтруємо "інших" (для назви чату та ініціалів)
         others = [u for u in all_members if u.id != current_user.id]
 
-        # --- ТУТ МИ ФОРМУЄМО members_data В ПАМ'ЯТІ (не з БД, а з об'єктів User) ---
         members_data = [
             {"nickname": u.nickname, "avatar": u.avatar}
             for u in all_members[:4]
@@ -1589,7 +1769,7 @@ async def get_chats(
             "title": chat.name if chat.is_group else (others[0].nickname if others else "Unknown"),
             "last_message": last_msg.content if last_msg else "Початок чату",
             "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
-            "unread_count": 0, # (тут твоя логіка)
+            "unread_count": unread_count, # <--- ПЕРЕДАЄМО РЕАЛЬНЕ ЗНАЧЕННЯ ЗАМІСТЬ 0
             "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
             "is_online": others[0].is_online if (not chat.is_group and others) else False,
             "is_group": chat.is_group,
@@ -1598,7 +1778,7 @@ async def get_chats(
             "rating": others[0].rating if (not chat.is_group and others) else None,
             "recipient_id": others[0].id if (not chat.is_group and others) else None,
             "avatar_url": chat.avatar_url if chat.is_group else (others[0].avatar if others else None),
-            "members": members_data # <--- ЦЕ САМЕ ТЕ, ЩО ТРЕБА
+            "members": members_data
         })
 
     return response
@@ -2139,6 +2319,34 @@ async def upload_chat_file(
         buffer.write(contents)
 
     return {"file_url": f"/uploads/chat_files/{unique_filename}"}
+
+@router.get("/chats/{chat_id}/search")
+def search_messages(chat_id: str, query: str, db: Session = Depends(get_db)):
+    # Шукаємо в базі всі повідомлення, що містять текст query
+    messages = db.query(Message).filter(
+        Message.chat_id == chat_id,
+        Message.content.ilike(f"%{query}%")
+    ).order_by(Message.created_at.desc()).all()
+
+    return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in messages]
+
+@app.get("/chats/{chat_id}/unread-count")
+async def get_chat_unread_count(
+        chat_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    stmt = (
+        select(func.count(Message.id))
+        .filter(
+            Message.chat_id == chat_id,
+            Message.sender_id != current_user_id,
+            Message.status != "read"
+        )
+    )
+    result = await db.execute(stmt)
+    count = result.scalar() or 0
+    return {"unread_count": count}
 
 app = socketio.ASGIApp(sio, app)
 if __name__ == "__main__":
