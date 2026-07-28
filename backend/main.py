@@ -2289,18 +2289,14 @@ async def activate_pro(
     return {"status": "success", "is_pro": user.is_pro, "expiry_date": user.pro_expiry_date.isoformat()}
 
 # File attachment
-router = APIRouter()
-
-@router.post("/chats/{chat_id}/upload")
+@app.post("/chats/{chat_id}/upload")
 async def upload_chat_file(
         chat_id: str,
         file: UploadFile = File(...),
-        user = Depends(get_current_user)
+        user = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
 ):
-    # Обмежуємо розмір до 1 МБ (1 * 1024 * 1024 байт)
     MAX_FILE_SIZE = 1 * 1024 * 1024
-
-    # Читаємо вміст для перевірки розміру
     contents = await file.read()
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
@@ -2314,21 +2310,26 @@ async def upload_chat_file(
     unique_filename = f"{uuid.uuid4()}.{file_extension}"
     file_location = f"uploads/chat_files/{unique_filename}"
 
-    # Записуємо збережені байти на диск
     with open(file_location, "wb") as buffer:
         buffer.write(contents)
 
     return {"file_url": f"/uploads/chat_files/{unique_filename}"}
 
-@router.get("/chats/{chat_id}/search")
-def search_messages(chat_id: str, query: str, db: Session = Depends(get_db)):
-    # Шукаємо в базі всі повідомлення, що містять текст query
-    messages = db.query(Message).filter(
+@app.get("/chats/{chat_id}/search")
+async def search_messages_in_chat(
+        chat_id: uuid.UUID,
+        query: str,
+        db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Message).filter(
         Message.chat_id == chat_id,
         Message.content.ilike(f"%{query}%")
-    ).order_by(Message.created_at.desc()).all()
+    ).order_by(Message.created_at.desc())
 
-    return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in messages]
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+
+    return [{"id": str(m.id), "content": m.content, "created_at": m.created_at.isoformat()} for m in messages]
 
 @app.get("/chats/{chat_id}/unread-count")
 async def get_chat_unread_count(

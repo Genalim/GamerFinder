@@ -238,8 +238,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         _loadHistory(_activeChatId!, isLoadNewer: true);
       }
 
-      final bool isNotAtBottom = minPosition.index > 1 || minPosition.itemLeadingEdge < 0;
-      final bool shouldShow = (_remainingUnread > 0) || isNotAtBottom;
+      // Визначаємо позицію низу
+      final minPosition1 = positions.reduce((min, p) => min.itemLeadingEdge < min.itemLeadingEdge ? p : min);
+
+      // Перевіряємо, чи видимий наймасивніший кінець списку (найновіші елементи біля інпуту)
+      final bool isNearBottomEdge = positions.any((p) => p.index <= 1);
+
+      // Якщо найвищий видимий елемент на екрані має індекс 0 (тобто це найновіше повідомлення внизу) — стрілка ЗНИКАЄ ЗАВЖДИ
+      bool shouldShow = true;
+      if ((minPosition1.index == 0 && minPosition1.itemLeadingEdge >= -0.1) || isNearBottomEdge) {
+        shouldShow = false;
+      } else {
+        shouldShow = minPosition1.index > 0 || minPosition1.itemLeadingEdge < -0.1;
+      }
 
       if (_showScrollDownButton != shouldShow) {
         setState(() => _showScrollDownButton = shouldShow);
@@ -568,6 +579,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
+    print("🚨 [LIFECYCLE_DETECTOR] УВАГА! Викликано dispose для ChatRoomScreen! Екран знищується!");
     _textController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -618,48 +630,70 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   void _addNewMessageToUi(Map<String, dynamic> messageData) {
-    if (!mounted) return;
-
-    if (messageData['chat_id'] != _activeChatId) {
+    if (!mounted) {
+      print("🕵️ [MSG_DETECTOR] ⚠️ _addNewMessageToUi проігноровано, бо mounted = false");
       return;
     }
 
-    final String senderId = messageData['sender_id'].toString();
-    final String content = messageData['content'];
+    final String msgChatId = messageData['chat_id']?.toString() ?? "";
+    if (msgChatId.isNotEmpty && msgChatId != _activeChatId) {
+      return;
+    }
+
+    final String senderId = messageData['sender_id']?.toString() ?? "";
+    final String content = messageData['content']?.toString() ?? "";
     final DateTime time = _parseDateTime(messageData['created_at'] ?? DateTime.now());
-
-    final bool isDuplicate = _messages.any((m) =>
-    m['content'] == content &&
-        m['sender_id'] == senderId &&
-        m['time'].difference(time).abs().inSeconds < 10
-    );
-
-    if (isDuplicate) {
-      return;
-    }
+    final String serverMessageId = messageData['id']?.toString() ?? 'unknown_id';
 
     setState(() {
-      _messages.add({
-        'id': messageData['id'].toString(),
-        'content': content,
-        'sender_id': senderId,
-        'sender_nickname': messageData.containsKey('sender_nickname')
-            ? messageData['sender_nickname']
-            : (senderId == UserSession().currentUser?.id.toString()
-            ? UserSession().currentUser?.nickname ?? "You"
-            : widget.friendName),
-        'isMe': senderId == UserSession().currentUser?.id.toString(),
-        'time': time,
-        'reply_to_id': messageData.containsKey('reply_to_id') ? messageData['reply_to_id'] : null,
-      });
+      // Перевіряємо, чи є у нас недавнє локальне повідомлення з тимчасовим ID від цього ж відправника з тим самим контентом
+      final int existingIndex = _messages.indexWhere((m) =>
+      m['id'].toString().startsWith('temp_') &&
+          m['content'] == content &&
+          m['sender_id'] == senderId
+      );
+
+      if (existingIndex != -1) {
+        print("🕵️ [MSG_DETECTOR] 🔄 Знайдено локальний 'temp_' дублікат. Оновлюємо його на серверний ID: $serverMessageId");
+        // Оновлюємо тимчасовий елемент на реальні дані від сервера (особливо реальний ID!)
+        _messages[existingIndex]['id'] = serverMessageId;
+        _messages[existingIndex]['status'] = messageData['status'] ?? 'sent';
+      } else {
+        // Стандартна перевірка на звичайні дублікати
+        final bool isDuplicate = _messages.any((m) =>
+        m['id'].toString() == serverMessageId ||
+            (m['content'] == content &&
+                m['sender_id'] == senderId &&
+                m['time'].difference(time).abs().inSeconds < 10)
+        );
+
+        if (isDuplicate) {
+          print("🕵️ [MSG_DETECTOR] 🔄 Знайдено дублікат повідомлення, пропускаємо додавання.");
+          return;
+        }
+
+        print("🕵️ [MSG_DETECTOR] ✅ Додаємо нове повідомлення у _messages...");
+        _messages.add({
+          'id': serverMessageId,
+          'content': content,
+          'sender_id': senderId,
+          'sender_nickname': messageData.containsKey('sender_nickname')
+              ? messageData['sender_nickname']
+              : (senderId == UserSession().currentUser?.id.toString()
+              ? UserSession().currentUser?.nickname ?? "You"
+              : widget.friendName),
+          'isMe': senderId == UserSession().currentUser?.id.toString(),
+          'time': time,
+          'status': messageData['status'] ?? 'sent',
+          'reply_to_id': messageData.containsKey('reply_to_id') ? messageData['reply_to_id'] : null,
+          'likes_count': messageData['likes_count'] ?? 0,
+          'is_liked_by_me': messageData['is_liked_by_me'] ?? false,
+        });
+      }
+
       _messages.sort((a, b) => a['time'].compareTo(b['time']));
     });
-
-    // 👇автоматичний скрол до нового повідомлення униз
-
-
   }
-
   String _removeForwardTag(String content) {
     return content.replaceAll(RegExp(r'^\[FWD:[^\]]+\]'), '');
   }
@@ -971,6 +1005,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   Future<void> _uploadAndSendFile(String filePath, {required bool isImage}) async {
     if (_activeChatId == null) return;
 
+    print("🕵️ [NAV_DETECTOR] Відкриваємо діалог завантаження...");
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -987,7 +1022,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
 
-      if (mounted) Navigator.pop(context);
+      print("🕵️ [NAV_DETECTOR] Запит завершено. Статус: ${response.statusCode}. Чи mounted: $mounted");
+
+      if (mounted) {
+        print("🕵️ [NAV_DETECTOR] Викликаємо Navigator.pop(context) для закриття крутилки...");
+        Navigator.of(context, rootNavigator: true).pop(); // Закриваємо саме діалог, гарантовано не чіпаючи екран чату
+        print("🕵️ [NAV_DETECTOR] Navigator.pop(context) успішно відпрацював.");
+      }
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -997,6 +1038,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl]";
 
         _addNewMessageToUi({
+          'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+          'chat_id': _activeChatId,
           'content': content,
           'sender_id': myId,
           'created_at': DateTime.now().toUtc().toIso8601String(),
@@ -1004,11 +1047,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
         ChatManager().sendMessage(_activeChatId!, myId, content);
       } else {
-        debugPrint("Помилка завантаження файлу: ${response.statusCode}");
+        if (mounted) _showErrorSnackBar("Upload failed: ${response.statusCode}");
       }
     } catch (e) {
-      if (mounted) Navigator.pop(context);
-      debugPrint("Виняток при завантаженні файлу: $e");
+      print("🕵️ [NAV_DETECTOR] 💥 Виняток у завантаженні: $e");
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _showErrorSnackBar("Error uploading file");
+      }
     }
   }
 
@@ -1073,7 +1119,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                         padding: const EdgeInsets.only(bottom: 20),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
-                          // ... твій існуючий itemBuilder без змін
                           final int reversedIndex = _messages.length - 1 - index;
                           final msg = _messages[reversedIndex];
                           final String msgId = msg['id'].toString();
@@ -1117,6 +1162,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                               if (_activeChatId != null) {
                                 _markAsReadOnServer(_activeChatId!);
                               }
+                              // 🚀 ПРИМУСОВЕ ГАСІННЯ КНОПКИ ТА ЛІЧИЛЬНИКА ПРИ КЛІКУ
                               setState(() {
                                 _showScrollDownButton = false;
                                 _remainingUnread = 0;
@@ -1135,7 +1181,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                                 const FigmaScrollDownIcon(),
                                 Builder(
                                   builder: (context) {
-                                    // 👈 Бейдж не зникає, поки кількість більша за 0
                                     if (_remainingUnread <= 0) return const SizedBox.shrink();
 
                                     return Positioned(
@@ -1150,7 +1195,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                                         child: Text(
                                           "$_remainingUnread",
                                           style: const TextStyle(
-                                            color: Color(0xFF0F0F13),
+                                            color: Color(0xFF0F0F1A),
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -1996,10 +2041,20 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
           width: 200,
           height: 200,
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => Text(
-            "[Помилка завантаження фото]",
-            style: TextStyle(color: widget.message.isMe ? Colors.redAccent : Colors.red, fontSize: 12),
-          ),
+          errorBuilder: (context, error, stackTrace) {
+            print("❌ ПОМИЛКА РЕНДЕРУ КАРТИНКИ: $error | URL: $fullUrl");
+            return Container(
+              width: 200,
+              height: 100,
+              color: Colors.red.withOpacity(0.2),
+              child: Center(
+                child: Text(
+                  "[Помилка завантаження]",
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
+              ),
+            );
+          },
         ),
       );
     }
