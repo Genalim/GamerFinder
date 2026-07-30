@@ -1261,6 +1261,16 @@ async def accept_notification(
     )
     db.add(auto_msg)
 
+    # === 🆕 ЗБІЛЬШУЄМО unread_count ДЛЯ ОТРИМУВАЧА АВТО-ПОВІДОМЛЕННЯ ===
+    await db.execute(
+        update(ChatMember)
+        .where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id != notif.sender_id
+        )
+        .values(unread_count=ChatMember.unread_count + 1)
+    )
+
     # 5. Фіксуємо все в БД одним махом
     await db.commit()
 
@@ -1624,22 +1634,33 @@ async def get_messages(
 @app.patch("/messages/read-up-to/{chat_id}")
 async def mark_messages_up_to_as_read(
         chat_id: uuid.UUID,
-        last_message_id: uuid.UUID,  # <-- Передається як query параметр з фронта
+        last_message_id: uuid.UUID,
         db: AsyncSession = Depends(get_db),
         current_user_id: int = Depends(get_current_user_id)
 ):
-    print(f"\n[BACKEND DETECTIVE] ---> РЕКВЕСТ read-up-to <---")
-    print(f"Chat ID: {chat_id}, Last Msg ID: {last_message_id}, Юзер, що читає (Мій ID): {current_user_id}")
-
-    # 1. Шукаємо цільове повідомлення
     target_msg = await db.get(Message, last_message_id)
     if not target_msg:
-        print(f"[BACKEND DETECTIVE] ❌ ПОМИЛКА: Повідомлення {last_message_id} не знайдено в БД!")
         return {"status": "error", "detail": "Message not found"}
 
-    print(f"[BACKEND DETECTIVE] 🎯 Цільове повідомлення знайдено! Створено: {target_msg.created_at}")
+    # 1. Отримуємо поточний запис учасника чату для перевірки попереднього якоря
+    member_result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user_id
+        )
+    )
+    member_record = member_result.scalar_one_or_none()
 
-    # 2. Формуємо запит на оновлення всіх попередніх повідомлень
+    if member_record and member_record.last_read_message_id:
+        current_last_read_msg = await db.get(Message, member_record.last_read_message_id)
+        if current_last_read_msg and target_msg.created_at <= current_last_read_msg.created_at:
+            return {
+                "status": "ignored",
+                "detail": "Requested message is older or equal to current read pointer",
+                "unread_count": member_record.unread_count
+            }
+
+    # 2. Оновлюємо статус самих повідомлень (тільки ті, що до цільового включно)
     stmt = (
         update(Message)
         .where(
@@ -1650,24 +1671,107 @@ async def mark_messages_up_to_as_read(
         )
         .values(status="read")
     )
-
-    # 3. Виконуємо і дивимось, скільки реально рядків зачепило
     result = await db.execute(stmt)
-    print(f"[BACKEND DETECTIVE] 📊 SQLAlchemy звітує: оновлено рядків (rowcount) = {result.rowcount}")
 
-    # 4. Фіксуємо транзакцію
+    # 3. Рахуємо реальний залишок непрочитаних для приватного чату
+    unread_query = select(func.count(Message.id)).where(
+        Message.chat_id == chat_id,
+        Message.created_at > target_msg.created_at,
+        Message.sender_id != current_user_id
+    )
+    unread_result = await db.execute(unread_query)
+    remaining_unread = unread_result.scalar() or 0
+
+    # 4. Оновлюємо ласт рід та реальний залишок unread_count у базі
+    if member_record:
+        member_record.last_read_message_id = last_message_id
+        member_record.unread_count = remaining_unread
+
     await db.commit()
-    print("[BACKEND DETECTIVE] ✅ Транзакція (commit) успішна!")
 
-    # 5. Контрольна перевірка напряму з БД: чи реально змінився статус?
-    await db.refresh(target_msg)
-    print(f"[BACKEND DETECTIVE] 🔍 КОНТРОЛЬ: Статус цільового повідомлення після commit -> {target_msg.status}")
+    # 5. Пушимо сокет
+    await sio.emit('messages_read', {
+        'chat_id': str(chat_id),
+        'last_read_id': str(last_message_id),
+        'unread_count': remaining_unread
+    }, room=str(chat_id))
 
-    # 6. Відправляємо сокет
-    await sio.emit('messages_read', {'chat_id': str(chat_id), 'last_read_id': str(last_message_id)}, room=str(chat_id))
-    print("[BACKEND DETECTIVE] 🚀 Сокет 'messages_read' відправлено!")
+    return {
+        "status": "ok",
+        "updated_count": result.rowcount,
+        "unread_count": remaining_unread
+    }
 
-    return {"status": "ok", "updated_count": result.rowcount}
+@app.patch("/messages/group/read-up-to/{chat_id}")
+async def mark_group_messages_up_to_as_read(
+        chat_id: uuid.UUID,
+        last_message_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    target_msg = await db.get(Message, last_message_id)
+    if not target_msg:
+        return {"status": "error", "detail": "Message not found"}
+
+    # 1. Отримуємо поточний запис учасника чату, щоб перевірити попередній якір
+    member_result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user_id
+        )
+    )
+    member_record = member_result.scalar_one_or_none()
+
+    if member_record and member_record.last_read_message_id:
+        # Шукаємо попереднє прочитане повідомлення, яке вже збережене в базі
+        current_last_read_msg = await db.get(Message, member_record.last_read_message_id)
+
+        # 🛡️ ПЕРЕВІРКА: Якщо нове повідомлення старіше або рівне за те, що вже збережене — нічого не робимо!
+        if current_last_read_msg and target_msg.created_at <= current_last_read_msg.created_at:
+            return {
+                "status": "ignored",
+                "detail": "Requested message is older or equal to current read pointer",
+                "unread_count": member_record.unread_count
+            }
+
+    # 2. Оновлюємо статус повідомлень у групі для всіх чужих повідомлень до цього часу включно
+    stmt = (
+        update(Message)
+        .where(
+            Message.chat_id == chat_id,
+            Message.sender_id != current_user_id,
+            Message.status != "read",
+            Message.created_at <= target_msg.created_at
+        )
+        .values(status="read")
+    )
+    result = await db.execute(stmt)
+
+    # 3. Рахуємо реальний залишок непрочитаних
+    unread_query = select(func.count(Message.id)).where(
+        Message.chat_id == chat_id,
+        Message.created_at > target_msg.created_at,
+        Message.sender_id != current_user_id
+    )
+    unread_result = await db.execute(unread_query)
+    remaining_unread = unread_result.scalar() or 0
+
+    # 4. Оновлюємо позицію в базі
+    if member_record:
+        member_record.last_read_message_id = last_message_id
+        member_record.unread_count = remaining_unread
+
+    await db.commit()
+
+    # 5. Емітимо сокет іншим
+    await sio.emit('messages_read', {
+        'chat_id': str(chat_id),
+        'user_id': current_user_id,
+        'last_read_id': str(last_message_id),
+        'unread_count': remaining_unread
+    }, room=str(chat_id))
+
+    return {"status": "ok", "updated_count": result.rowcount, "unread_count": remaining_unread}
 
 @app.patch("/messages/{message_id}/read")
 async def mark_single_message_as_read(
@@ -1724,7 +1828,6 @@ async def get_chats(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
 ):
-    # 1. Шукаємо чати
     hidden_chats_subquery = select(ChatHidden.chat_id).where(ChatHidden.user_id == current_user.id).scalar_subquery()
 
     result = await db.execute(
@@ -1740,16 +1843,15 @@ async def get_chats(
         )
         last_msg = msg_res.scalar_one_or_none()
 
-        # --- ДОДАЄМО ПІДРАХУНОК НЕПРОЧИТАНИХ ДЛЯ ЦЬОГО ЧАТУ ---
-        unread_res = await db.execute(
-            select(func.count(Message.id)).where(
-                Message.chat_id == chat.id,
-                Message.sender_id != current_user.id,
-                Message.status != "read" # або Message.is_read == False залежно від вашої моделі
+        # === 🆕 БЕРЕМО unread_count ПРЯМО З ТАБЛИЦІ ChatMember ===
+        member_res = await db.execute(
+            select(ChatMember.unread_count).where(
+                ChatMember.chat_id == chat.id,
+                ChatMember.user_id == current_user.id
             )
         )
-        unread_count = unread_res.scalar() or 0
-        # ------------------------------------------------------
+        unread_count = member_res.scalar() or 0
+        # ========================================================
 
         # Отримуємо ВСІХ учасників цього чату
         members_res = await db.execute(
@@ -1769,7 +1871,7 @@ async def get_chats(
             "title": chat.name if chat.is_group else (others[0].nickname if others else "Unknown"),
             "last_message": last_msg.content if last_msg else "Початок чату",
             "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
-            "unread_count": unread_count, # <--- ПЕРЕДАЄМО РЕАЛЬНЕ ЗНАЧЕННЯ ЗАМІСТЬ 0
+            "unread_count": unread_count,
             "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
             "is_online": others[0].is_online if (not chat.is_group and others) else False,
             "is_group": chat.is_group,
@@ -1899,6 +2001,17 @@ async def forward_message(
             status="sent"
         )
         db.add(new_msg)
+
+        # === 🆕 ЗБІЛЬШУЄМО unread_count ДЛЯ ІНШИХ УЧАСНИКІВ У ЦЬОМУ ЧАТІ ===
+        await db.execute(
+            update(ChatMember)
+            .where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.user_id != current_user_id
+            )
+            .values(unread_count=ChatMember.unread_count + 1)
+        )
+        # ================================================================
         await sio.emit('new_message', {
             'chat_id': str(chat_id),
             'content': new_msg.content,
@@ -1924,6 +2037,18 @@ async def delete_message(
         raise HTTPException(status_code=403, detail="Не можна видалити це повідомлення")
 
     chat_id = message.chat_id
+
+    # Якщо видалене повідомлення ще НЕ було прочитане іншим учасником зменшуємо кількість непрочитаних
+    if message.status != "read":
+        await db.execute(
+            update(ChatMember)
+            .where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.user_id != current_user.id,
+                ChatMember.unread_count > 0  # Захист від від'ємних чисел
+            )
+            .values(unread_count=ChatMember.unread_count - 1)
+        )
 
     # 3. Видаляємо з БД
     await db.delete(message)
@@ -1984,7 +2109,9 @@ async def create_group_chat(
     await db.flush()
 
     for uid in target_user_ids:
-        db.add(ChatMember(chat_id=new_chat.id, user_id=uid))
+        # 🔥 Якщо це той, хто створив групу — робимо його адміном і в ChatMember
+        is_user_admin = (uid == current_user_id)
+        db.add(ChatMember(chat_id=new_chat.id, user_id=uid, is_admin=is_user_admin))
 
     await db.commit()
     return {"chat_id": str(new_chat.id)}
@@ -2019,7 +2146,8 @@ async def get_chat_info(
         "chat_id": str(chat.id),
         "name": chat.name,
         "members": members_data,
-        "is_me_admin": is_me_admin
+        "is_me_admin": is_me_admin,
+        "avatar_url": chat.avatar_url
     }
 # Ендпоінт для оновлення назви групи
 @app.patch("/group_chats/{chat_id}/name")
@@ -2072,7 +2200,7 @@ async def upload_chat_avatar(
         shutil.copyfileobj(file.file, buffer)
 
     # 3. Оновлюємо посилання в базі
-    chat.avatar_url = f"http://127.0.0.1:8000/{file_location}"
+    chat.avatar_url = f"/{file_location}"
     await db.commit()
 
     return {"url": chat.avatar_url}

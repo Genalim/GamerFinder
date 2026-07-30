@@ -61,6 +61,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   int _remainingUnread = 0;
 
   bool _isInitializing = true;
+  bool _isJumpingToUnread = false;
 
   int _currentOffset = 0;
   bool _isLoadingMore = false;
@@ -74,6 +75,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   bool _isAutoScrolling = false;
   String? _lastSentReadMessageId;
+  int _lastSentMessageIndex = -1;
 
   // Використовуємо контролери пакета scrollable_positioned_list
   final ItemScrollController _itemScrollController = ItemScrollController();
@@ -190,44 +192,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
     _itemPositionsListener.itemPositions.addListener(() {
       if (!mounted) return;
-      if (_isInitializing || _activeChatId == null) return;
+      if (_isInitializing || _isJumpingToUnread || _activeChatId == null) return;
 
       final positions = _itemPositionsListener.itemPositions.value;
       if (positions.isEmpty) return;
 
-      // 🕵️ ДЕТЕКТИВ СКРОЛУ: Дивимося що саме бачить Flutter на екрані
-      final visibleItems = positions.where((p) => p.itemLeadingEdge >= 0.0 && p.itemTrailingEdge <= 1.0).toList();
+      final visibleItems = positions.where((p) => p.itemLeadingEdge <= 1.0 && p.itemTrailingEdge >= 0.0).toList();
 
       if (visibleItems.isNotEmpty) {
-        // Знаходимо найближчий до поля вводу (знизу екрана) елемент із мінімальним індексом
         final targetVisibleItem = visibleItems.reduce((min, p) => p.index < min.index ? p : min);
-
         int reversedIdx = _messages.length - 1 - targetVisibleItem.index;
+
         if (reversedIdx >= 0 && reversedIdx < _messages.length) {
           final msg = _messages[reversedIdx];
           final String myId = UserSession().currentUser?.id.toString() ?? "";
           final String msgSenderId = msg['sender_id']?.toString() ?? "";
-          final String msgStatus = msg['status']?.toString() ?? "sent";
           final String msgId = msg['id']?.toString() ?? "";
-          final String content = msg['content']?.toString() ?? "";
 
-          // Детальний лог кожного видимого елемента під час скролу
-          print("🕵️ [SCROLL_DETECTIVE] Видимий індекс біля інпуту: ${targetVisibleItem.index} (rev: $reversedIdx) | Текст: '$content' | ID: $msgId | Статус: $msgStatus | Від кого: $msgSenderId");
-
-          // Якщо це повідомлення від співрозмовника і воно ще не прочитане
-          if (msgSenderId != myId && msgStatus != 'read') {
-            if (_lastSentReadMessageId != msgId) {
+          // Якщо повідомлення НЕ наше
+          if (msgSenderId != myId) {
+            // 🛡️ ФРОНТЕНД-ФІЛЬТР: Шлемо запит ТІЛЬКИ якщо ми проскролили далі вперед (новий індекс більший за попередній)
+            if (_lastSentReadMessageId != msgId && reversedIdx > _lastSentMessageIndex) {
               _lastSentReadMessageId = msgId;
-              print("🎯 [FRONTEND DETECTIVE] 🚀 ШЛЕМО НА БЕКЕНД РІД ДО НИЖНЬОГО ID: $msgId");
+              _lastSentMessageIndex = reversedIdx; // Оновлюємо планку прогресу
 
-              // Шлемо запит на бекенд
+              print("🎯 [FRONTEND DETECTIVE] 🚀 ШЛЕМО НА БЕКЕНД РІД ДО ID: $msgId (Індекс масиву: $reversedIdx)");
               _markAsReadOnServer(_activeChatId!, lastMessageId: msgId);
             }
           }
         }
       }
 
-      // Логіка довантаження історії (вгору / вниз)
+      // --- Пагінація та кнопка вниз ---
       final maxPosition = positions.reduce((max, p) => p.itemTrailingEdge > max.itemTrailingEdge ? p : max);
       final minPosition = positions.reduce((min, p) => min.itemLeadingEdge < min.itemLeadingEdge ? p : min);
 
@@ -238,18 +234,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         _loadHistory(_activeChatId!, isLoadNewer: true);
       }
 
-      // Визначаємо позицію низу
-      final minPosition1 = positions.reduce((min, p) => min.itemLeadingEdge < min.itemLeadingEdge ? p : min);
-
-      // Перевіряємо, чи видимий наймасивніший кінець списку (найновіші елементи біля інпуту)
       final bool isNearBottomEdge = positions.any((p) => p.index <= 1);
-
-      // Якщо найвищий видимий елемент на екрані має індекс 0 (тобто це найновіше повідомлення внизу) — стрілка ЗНИКАЄ ЗАВЖДИ
       bool shouldShow = true;
-      if ((minPosition1.index == 0 && minPosition1.itemLeadingEdge >= -0.1) || isNearBottomEdge) {
+      if ((minPosition.index == 0 && minPosition.itemLeadingEdge >= -0.1) || isNearBottomEdge) {
         shouldShow = false;
       } else {
-        shouldShow = minPosition1.index > 0 || minPosition1.itemLeadingEdge < -0.1;
+        shouldShow = minPosition.index > 0 || minPosition.itemLeadingEdge < -0.1;
       }
 
       if (_showScrollDownButton != shouldShow) {
@@ -446,16 +436,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           if (!isLoadMore && !isLoadNewer) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (_messages.isNotEmpty) {
-                // Встановлюємо початковий лічильник з віджета, якщо він є
                 if (widget.unreadCount > 0) {
                   setState(() {
                     _remainingUnread = widget.unreadCount;
                     _showScrollDownButton = true;
                   });
-
                 }
 
-                Future.delayed(const Duration(milliseconds: 800), () {
+                // Ставимо 1000 мс, щоб дати повністю відмалюватися списку, як у груповому чаті
+                Future.delayed(const Duration(milliseconds: 1000), () {
                   if (mounted) {
                     setState(() {
                       _isInitializing = false;
@@ -465,10 +454,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
                 if (_itemScrollController.isAttached) {
                   if (widget.unreadCount > 0) {
-                    // Стрибаємо рівно на позицію непрочитаних з урахуванням реверса
                     final int targetIndex = min(widget.unreadCount, _messages.length - 1);
                     print("🎯 [SCROLL] Точний стрибок за unreadCount: ${widget.unreadCount} на позицію $targetIndex");
+
+                    _isJumpingToUnread = true; // 🛡️ Блокуємо слухач від хибних спрацьовувань при стрибку
+
+                    // Просто викликаємо jumpTo (він миттєвий)
                     _itemScrollController.jumpTo(index: targetIndex, alignment: 0.2);
+
+                    // І запускаємо паралельний таймер на зняття блокування
+                    Future.delayed(const Duration(milliseconds: 400), () {
+                      if (mounted) {
+                        _isJumpingToUnread = false; // 🔓 Знімаємо блокування
+                      }
+                    });
                   } else {
                     _itemScrollController.jumpTo(index: 0, alignment: 0.0);
                   }
@@ -489,8 +488,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   String? _friendAvatarUrl;
 
   Future<void> _markAsReadOnServer(String chatId, {String? lastMessageId}) async {
-    if (lastMessageId == null) return;
+    if (lastMessageId == null || lastMessageId.isEmpty) return;
+
     try {
+      // Використовуємо такий же ендпоінт або аналогічний для приватних чатів з передачею last_message_id
       String url = '${ApiConfig.baseUrl}/messages/read-up-to/$chatId?last_message_id=$lastMessageId';
 
       final response = await http.patch(
@@ -499,28 +500,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
       );
 
       if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        // Якщо бекенд повертає unread_count у відповіді, беремо його.
+        // Якщо ні — бекенд можна трохи доповнити, або залишити страховочний виклик _fetchFreshUnreadCount()
+        final int serverUnread = data['unread_count'] ?? 0;
+
         final String myId = UserSession().currentUser?.id.toString() ?? "";
         setState(() {
           final int targetIndex = _messages.indexWhere((m) => m['id'].toString() == lastMessageId);
-          int newlyReadCount = 0;
 
-          for (int i = 0; i < _messages.length; i++) {
+          for (int i = 0; i <= targetIndex && i < _messages.length; i++) {
             var msg = _messages[i];
             if (msg['sender_id'] != myId && msg['status'] != 'read') {
-              if (targetIndex != -1 && i <= targetIndex) {
-                msg['status'] = 'read';
-                newlyReadCount++; // Рахуємо скільки повідомлень щойно стали прочитаними
-              }
+              msg['status'] = 'read';
             }
           }
 
-          // Плавно зменшуємо лічильник бейджів на кількість прочитаних
-          if (newlyReadCount > 0) {
-            _remainingUnread = (_remainingUnread - newlyReadCount).clamp(0, 9999);
+          _remainingUnread = serverUnread;
+          if (_remainingUnread <= 0) {
+            _showScrollDownButton = false;
           }
         });
 
-        // Підтягуємо точний актуальний лічильник з бекенда для контролю
         _fetchFreshUnreadCount();
       }
     } catch (e) {
@@ -643,10 +644,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     final String senderId = messageData['sender_id']?.toString() ?? "";
     final String content = messageData['content']?.toString() ?? "";
     final DateTime time = _parseDateTime(messageData['created_at'] ?? DateTime.now());
-    final String serverMessageId = messageData['id']?.toString() ?? 'unknown_id';
+    final String serverMessageId = messageData['id']?.toString() ?? '';
 
     setState(() {
-      // Перевіряємо, чи є у нас недавнє локальне повідомлення з тимчасовим ID від цього ж відправника з тим самим контентом
+      // Шукаємо недавнє локальне повідомлення з тимчасовим ID (temp_)
       final int existingIndex = _messages.indexWhere((m) =>
       m['id'].toString().startsWith('temp_') &&
           m['content'] == content &&
@@ -655,20 +656,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
       if (existingIndex != -1) {
         print("🕵️ [MSG_DETECTOR] 🔄 Знайдено локальний 'temp_' дублікат. Оновлюємо його на серверний ID: $serverMessageId");
-        // Оновлюємо тимчасовий елемент на реальні дані від сервера (особливо реальний ID!)
         _messages[existingIndex]['id'] = serverMessageId;
         _messages[existingIndex]['status'] = messageData['status'] ?? 'sent';
       } else {
-        // Стандартна перевірка на звичайні дублікати
-        final bool isDuplicate = _messages.any((m) =>
-        m['id'].toString() == serverMessageId ||
-            (m['content'] == content &&
-                m['sender_id'] == senderId &&
-                m['time'].difference(time).abs().inSeconds < 10)
-        );
+        // ПЕРЕВІРКА ТІЛЬКИ ЗА ID (прибрано перевірку m['content'] == content, щоб повторювані повідомлення не блокувались)
+        final bool isDuplicate = _messages.any((m) => m['id'].toString() == serverMessageId);
 
         if (isDuplicate) {
-          print("🕵️ [MSG_DETECTOR] 🔄 Знайдено дублікат повідомлення, пропускаємо додавання.");
+          print("🕵️ [MSG_DETECTOR] 🔄 Знайдено дублікат повідомлення за ID, пропускаємо додавання.");
           return;
         }
 
@@ -759,6 +754,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   Future<void> _deleteMessage(String messageId) async {
+    print("🕵️ [DELETE_DEBUG] Намагаємося видалити повідомлення з ID: $messageId");
+
+    if (messageId.isEmpty || messageId == 'unknown_id' || messageId.startsWith('temp_')) {
+      setState(() {
+        _messages.removeWhere((m) => m['id'] == messageId);
+      });
+      return;
+    }
+
     try {
       final response = await http.delete(
         Uri.parse('${ApiConfig.baseUrl}/messages/$messageId'),
@@ -808,6 +812,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
             builder: (context) => ChatAddFriendsGroupScreen(
               onClose: () => Navigator.pop(context),
               currentFriendName: widget.friendName,
+              currentPartnerId: widget.friendId,
               friendsList: friends,
             ),
           ),
@@ -1512,11 +1517,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                             setState(() => _messageToEdit = null);
                           } else {
                             final replyId = _messageToReply != null ? _messageToReply!['id'] : null;
+                            final String tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
                             _addNewMessageToUi({
-                              'content': content,
-                              'sender_id': myId,
-                              'created_at': DateTime.now().toUtc().toIso8601String(),
-                              'reply_to_id': replyId,
+                            'id': tempId,
+                            'content': content,
+                            'sender_id': myId,
+                            'created_at': DateTime.now().toUtc().toIso8601String(),
+                            'reply_to_id': replyId,
                             });
 
 

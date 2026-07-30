@@ -150,18 +150,27 @@ class ChatMember(Base):
     __tablename__ = 'chat_members'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
-    user_id = Column(Integer, ForeignKey('users.id')) # МАЄ БУТИ INTEGER!
+    user_id = Column(Integer, ForeignKey('users.id'))
     role = Column(String, default='member')
     is_admin = Column(Boolean, default=False, nullable=False)
+
+    # 🆕 ПОЛЯ ДЛЯ ІНДИВІДУАЛЬНОГО ТРЕКІНГУ ПРОЧИТАНОГО:
+    # Зберігає ID останнього повідомлення, яке цей конкретний користувач прочитав у цьому чаті
+    last_read_message_id = Column(UUID(as_uuid=True), ForeignKey('messages.id'), nullable=True)
+    # Персональна кількість непрочитаних для цього юзера в цьому чаті (для швидкого виведення бейджів)
+    unread_count = Column(Integer, default=0)
 
 class Message(Base):
     __tablename__ = 'messages'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id'))
-    sender_id = Column(Integer, ForeignKey('users.id')) # ТУТ ТЕЖ МАЄ БУТИ INTEGER!
+    sender_id = Column(Integer, ForeignKey('users.id'))
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
-    is_read = Column(Boolean, default=False)
+
+    # ⚠️ Примітка: глобальні полів is_read більше немає на повідомленні,
+    # оскільки в групі воно може бути прочитане одним і не прочитане іншим.
+    # Поле status залишаємо для статусу доставки на сервер ('sent').
     status = Column(String, default="sent")
     reply_to_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"), nullable=True)
     reactions = relationship("MessageReaction", back_populates="message", cascade="all, delete-orphan")

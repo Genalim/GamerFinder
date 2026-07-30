@@ -10,6 +10,7 @@ import 'api_service.dart';
 class ChatAddFriendsGroupScreen extends StatefulWidget {
   final VoidCallback onClose;
   final String currentFriendName;
+  final String? currentPartnerId;
   final List<FriendItem> friendsList;
   final String? chatId; // <-- Додаємо (null, якщо створюємо нову)
   final List<int>? existingMemberIds;
@@ -18,6 +19,7 @@ class ChatAddFriendsGroupScreen extends StatefulWidget {
     super.key,
     required this.onClose,
     required this.currentFriendName,
+    this.currentPartnerId,
     required this.friendsList,
     this.chatId,
     this.existingMemberIds,
@@ -115,7 +117,7 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
                       .toList();
 
                   if (widget.chatId != null) {
-                    // ВАРІАНТ: Додавання в існуючий чат
+                    // ВАРІАНТ А: Додавання в існуючий чат (тут поточного партнера додавати НЕ треба, він і так там є)
                     final response = await http.post(
                         Uri.parse('${ApiConfig.baseUrl}/group_chats/${widget.chatId}/add-members'),
                         headers: await ApiService.getHeaders(),
@@ -123,13 +125,19 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
                     );
 
                     if (response.statusCode == 200) {
-                      // Повертаємо true, щоб оновити дані в батьківському екрані (ChatInfo)
                       Navigator.pop(context, true);
                     } else {
                       debugPrint("Помилка додавання: ${response.statusCode}");
                     }
                   } else {
-                    // ВАРІАНТ: Створення нової групи
+                    // ВАРІАНТ Б: Створення нової групи (ОБОВ'ЯЗКОВО додаємо поточного співрозмовника з сінгл-чату)
+                    if (widget.currentPartnerId != null) {
+                      int? partnerId = int.tryParse(widget.currentPartnerId!);
+                      if (partnerId != null && !selectedIds.contains(partnerId)) {
+                        selectedIds.add(partnerId);
+                      }
+                    }
+
                     final response = await http.post(
                         Uri.parse('${ApiConfig.baseUrl}/chats/create-group'),
                         headers: await ApiService.getHeaders(),

@@ -236,7 +236,7 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
               chatId: chatOrName.id,
               participantNames: chatOrName.userInitials, // Ініціали, що приходять з бекенду
               onBack: _closeAndRefresh, // Зберігаємо метод оновлення
-              //unreadCount: chatOrName.unreadCount,
+              unreadCount: chatOrName.unreadCount,
             ),
           ),
         );

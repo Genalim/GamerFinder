@@ -3,7 +3,7 @@ from datetime import datetime
 import uuid
 from database import AsyncSessionLocal
 from models import Message, User, ChatHidden, ChatMember, Chat, Friendship
-from sqlalchemy import select, delete, and_, or_
+from sqlalchemy import select, delete, and_, or_, update
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
@@ -76,6 +76,17 @@ async def send_message(sid, data):
         await db.execute(
             delete(ChatHidden).where(ChatHidden.chat_id == chat_id)
         )
+
+        # === 🆕 ЗБІЛЬШУЄМО unread_count ДЛЯ ВСІХ ІНШИХ УЧАСНИКІВ ЧАТУ ===
+        await db.execute(
+            update(ChatMember)
+            .where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.user_id != sender_id
+            )
+            .values(unread_count=ChatMember.unread_count + 1)
+        )
+        # ================================================================
 
         await db.commit()
 
