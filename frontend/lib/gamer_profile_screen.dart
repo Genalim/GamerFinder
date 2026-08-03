@@ -6,6 +6,7 @@ import 'user_session.dart';
 import 'api_service.dart';
 import 'new_chat_room_screen.dart';
 import 'api_config.dart';
+import 'services/chat_manager.dart';
 
 // Створюємо enum для зручного керування станами кнопки дружби
 enum FriendStatus {
@@ -58,6 +59,10 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   // Початковий стан беремо за замовчуванням addFriend
   FriendStatus _currentStatus = FriendStatus.addFriend;
 
+  bool _isOnline = false;
+  String? _friendLastSeen;
+  late final Function(String, bool) _statusListener;
+
   // Контролер для керування показом меню опцій (Remove / Block / Unblock)
   final _overlayController = OverlayPortalController();
   final _layerLink = LayerLink();
@@ -68,7 +73,28 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _isOnline = widget.profile.isOnline;
     _fetchStatus();
+
+    // Слухач сокет-подій статусу в реальному часі
+    _statusListener = (userId, isOnline) {
+      if (!mounted) return;
+      if (userId.toString() == widget.profile.id.toString()) {
+        setState(() {
+          _isOnline = isOnline;
+          if (!isOnline) {
+            _friendLastSeen = DateTime.now().toUtc().toIso8601String();
+          }
+        });
+      }
+    };
+    ChatManager().addStatusListener(_statusListener);
+  }
+
+  @override
+  void dispose() {
+    ChatManager().removeStatusListener(_statusListener);
+    super.dispose();
   }
 
   Future<void> _fetchStatus() async {
@@ -79,12 +105,15 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
       final ratingData = await ApiService.getMyRating(widget.profile.id);
       print("DEBUG: Рейтинг отримано: $ratingData");
 
+      // Додатково підтягуємо свіжий профіль для актуального last_seen та is_online
+      final freshProfile = await ApiService.getUserProfileById(widget.profile.id.toString());
+
       if (!mounted) return;
 
       setState(() {
-        if (status == "request_sent") { // Змінено з "pending"
+        if (status == "request_sent") {
           _currentStatus = FriendStatus.requestSent;
-        } else if (status == "request_received") { // Додано обробку
+        } else if (status == "request_received") {
           _currentStatus = FriendStatus.requestReceived;
         } else if (status == "accepted") {
           _currentStatus = FriendStatus.friends;
@@ -97,10 +126,45 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
         }
         _currentProfileRating = ratingData['rating'] ?? 0;
         _hasRatedGamer = ratingData['is_rated'] ?? false;
+        _isOnline = freshProfile.isOnline;
+        _friendLastSeen = freshProfile.lastSeen; // Переконайся, що у моделі GamerProfile є поле last_seen (або передай напряму)
         print("DEBUG: setState успішно завершено.");
       });
     } catch (e) {
       print("Помилка: $e");
+    }
+  }
+
+  String _formatOfflineTime(String? lastSeenIso) {
+    if (lastSeenIso == null || lastSeenIso.isEmpty) return "offline";
+
+    try {
+      String timeString = lastSeenIso.trim();
+      if (timeString.contains(' ') && !timeString.contains('T')) {
+        timeString = timeString.replaceFirst(' ', 'T');
+      }
+      if (!timeString.contains('Z') && !timeString.contains('+') && !timeString.contains(RegExp(r'-\d{2}:\d{2}'))) {
+        timeString += 'Z';
+      }
+
+      DateTime lastSeenTime = DateTime.parse(timeString).toLocal();
+      Duration difference = DateTime.now().difference(lastSeenTime);
+
+      if (difference.isNegative || difference.inMinutes < 1) {
+        return "offline just now";
+      } else if (difference.inMinutes < 60) {
+        int minutes = difference.inMinutes;
+        return "offline $minutes minute${minutes == 1 ? '' : 's'}";
+      } else if (difference.inHours < 24) {
+        int hours = difference.inHours;
+        return "offline $hours hour${hours == 1 ? '' : 's'}";
+      } else {
+        int days = difference.inDays;
+        return "offline $days day${days == 1 ? '' : 's'}";
+      }
+    } catch (e) {
+      debugPrint("Помилка парсингу last_seen: $e");
+      return "offline";
     }
   }
 
@@ -392,13 +456,13 @@ class _GamerProfileScreenState extends State<GamerProfileScreen> {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: widget.profile.isOnline ? accentColor : const Color(0xFF8E8EA9),
+                      color: _isOnline ? accentColor : const Color(0xFF8E8EA9),
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    widget.profile.isOnline ? 'Online' : 'Offline',
+                    _isOnline ? 'Online' : _formatOfflineTime(_friendLastSeen),
                     style: const TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontSize: 10),
                   ),
                   const SizedBox(width: 48),

@@ -19,6 +19,7 @@ import 'models.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String friendName;
@@ -55,6 +56,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   Map<String, dynamic>? _messageToEdit;
   Map<String, dynamic>? _messageToReply;
 
+  bool _isFriendOnline = false;
+
   // Додаємо змінну для реального ID чату
   String? _activeChatId;
 
@@ -77,6 +80,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   String? _lastSentReadMessageId;
   int _lastSentMessageIndex = -1;
 
+  String? _friendLastSeen;
+  late final Function(String, bool) _statusListener;
+
   // Використовуємо контролери пакета scrollable_positioned_list
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
@@ -90,8 +96,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     final String? lastReadId = data['last_read_id']?.toString();
     print("🕵️ [DEEP_DETECTIVE] 🟢 ВИКЛИК _markMessagesAsReadUi для last_read_id: $lastReadId");
 
-    final String myId = UserSession().currentUser?.id.toString() ?? "";
-
     setState(() {
       if (lastReadId != null) {
         final int targetIndex = _messages.indexWhere((m) => m['id'].toString() == lastReadId);
@@ -103,17 +107,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           final String content = msg['content'].toString();
           final String currentStatus = msg['status'];
 
-          // Логуємо КОЖНЕ повідомлення, яке не від нас
-          if (msg['sender_id'] != myId) {
-            bool shouldBeRead = (targetIndex != -1 && i <= targetIndex);
+          bool shouldBeRead = (targetIndex != -1 && i <= targetIndex);
 
-            if (shouldBeRead && currentStatus != 'read') {
-              print("🕵️ [DEEP_DETECTIVE] ✅ ЗМІНЮЄМО НА READ -> Текст: '$content' (індекс: $i, ID: $msgId)");
-              msg['status'] = 'read';
-            } else if (!shouldBeRead && currentStatus == 'read') {
-              // Упс! Якщо повідомлення чомусь вже read, але за логікою воно НЕ повинно бути прочитаним:
-              print("🕵️ [DEEP_DETECTIVE] ⚠️ АНОМАЛІЯ! Текст '$content' (індекс: $i, ID: $msgId) вже READ, хоча індекс ($i) > targetIndex ($targetIndex)!");
-            }
+          if (shouldBeRead && currentStatus != 'read') {
+            print("🕵️ [DEEP_DETECTIVE] ✅ ЗМІНЮЄМО НА READ -> Текст: '$content' (індекс: $i, ID: $msgId)");
+            msg['status'] = 'read';
+          } else if (!shouldBeRead && currentStatus == 'read') {
+            print("🕵️ [DEEP_DETECTIVE] ⚠️ АНОМАЛІЯ! Текст '$content' (індекс: $i, ID: $msgId) вже READ, хоча індекс ($i) > targetIndex ($targetIndex)!");
           }
         }
       }
@@ -139,6 +139,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         _isConnected = connected;
       });
     };
+
+    // 🚀 ДОДАЄМО СЛУХАЧ ОНЛАЙН-СТАТУСУ В РЕАЛЬНОМУ ЧАСІ:
+    _statusListener = (userId, isOnline) {
+      if (!mounted) return;
+      if (userId == widget.friendId) {
+        setState(() {
+          _isFriendOnline = isOnline;
+          print("🔄 [REALTIME_STATUS] Статус друга ${widget.friendName} змінено на: $isOnline");
+          if (!isOnline) {
+            _friendLastSeen = DateTime.now().toUtc().toIso8601String();
+          }
+        });
+      }
+    };
+    ChatManager().addStatusListener(_statusListener);
 
     final myId = UserSession().currentUser?.id.toString() ?? "";
     ChatManager().init(myId);
@@ -564,14 +579,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   Future<void> _loadFriendAvatar(String friendId) async {
+    print("🕵️ [AVATAR_DEBUG] Викликаємо завантаження для friendId: $friendId");
     try {
       final userResponse = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/users/$friendId'),
         headers: await ApiService.getHeaders(),
       );
+
+      print("🕵️ [AVATAR_DEBUG] Відповідь /users/$friendId: статуc ${userResponse.statusCode}, тіло: ${userResponse.body}");
+
       if (userResponse.statusCode == 200 && userResponse.body.isNotEmpty) {
         final userData = json.decode(userResponse.body);
-        setState(() => _friendAvatarUrl = userData['avatar']);
+        setState(() {
+          _friendAvatarUrl = userData['avatar'];
+          _isFriendOnline = userData['is_online'] ?? false;
+          _friendLastSeen = userData['last_seen'];
+          print("🕵️ [AVATAR_DEBUG] Успішно збережено _friendLastSeen = $_friendLastSeen");
+        });
       }
     } catch (e) {
       debugPrint("Помилка завантаження аватара: $e");
@@ -580,8 +604,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
-    print("🚨 [LIFECYCLE_DETECTOR] УВАГА! Викликано dispose для ChatRoomScreen! Екран знищується!");
+    print("🚨 [LIFECYCLE_DETECTOR] Викликано dispose для ChatRoomScreen!");
+
+    // 🛡️ Обов'язково знімаємо слухач статусів та всі сокет-події екрану
+    ChatManager().removeStatusListener(_statusListener);
+    ChatManager().socket?.off('new_message');
+    ChatManager().socket?.off('messages_read');
+    ChatManager().socket?.off('user_typing');
+    ChatManager().socket?.off('message_edited');
+    ChatManager().socket?.off('message_deleted');
+    ChatManager().socket?.off('reaction_updated');
+    ChatManager().socket?.off('error');
+
     _textController.dispose();
+    _focusNode.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -646,6 +682,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     final DateTime time = _parseDateTime(messageData['created_at'] ?? DateTime.now());
     final String serverMessageId = messageData['id']?.toString() ?? '';
 
+    // 🎯 ОСЬ ТУТ ВОНО ОБОВ'ЯЗКОВО МАЄ БУТИ ОГОЛОШЕНЕ:
+    final String myId = UserSession().currentUser?.id.toString() ?? "";
+
     setState(() {
       // Шукаємо недавнє локальне повідомлення з тимчасовим ID (temp_)
       final int existingIndex = _messages.indexWhere((m) =>
@@ -659,7 +698,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         _messages[existingIndex]['id'] = serverMessageId;
         _messages[existingIndex]['status'] = messageData['status'] ?? 'sent';
       } else {
-        // ПЕРЕВІРКА ТІЛЬКИ ЗА ID (прибрано перевірку m['content'] == content, щоб повторювані повідомлення не блокувались)
         final bool isDuplicate = _messages.any((m) => m['id'].toString() == serverMessageId);
 
         if (isDuplicate) {
@@ -674,10 +712,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           'sender_id': senderId,
           'sender_nickname': messageData.containsKey('sender_nickname')
               ? messageData['sender_nickname']
-              : (senderId == UserSession().currentUser?.id.toString()
+              : (senderId == myId // Використовується тут
               ? UserSession().currentUser?.nickname ?? "You"
               : widget.friendName),
-          'isMe': senderId == UserSession().currentUser?.id.toString(),
+          'isMe': senderId == myId, // І тут
           'time': time,
           'status': messageData['status'] ?? 'sent',
           'reply_to_id': messageData.containsKey('reply_to_id') ? messageData['reply_to_id'] : null,
@@ -688,6 +726,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
 
       _messages.sort((a, b) => a['time'].compareTo(b['time']));
     });
+
+    // 🚀 Автоматичне прочитання у кінці методу:
+    if (senderId != myId && _activeChatId != null) { // І тут
+      print("🚀 [AUTO-READ] Автоматично позначаємо нове повідомлення $serverMessageId як прочитане.");
+      _markAsReadOnServer(_activeChatId!, lastMessageId: serverMessageId);
+    }
   }
   String _removeForwardTag(String content) {
     return content.replaceAll(RegExp(r'^\[FWD:[^\]]+\]'), '');
@@ -983,7 +1027,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   }
 
   Future<void> _pickAndSendFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(withData: true);
+    FilePickerResult? result = await FilePicker.pickFiles(withData: true);
 
     if (result != null && result.files.single.path != null) {
       final file = result.files.single;
@@ -1040,7 +1084,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         final String fileUrl = data['file_url'];
 
         final String myId = UserSession().currentUser?.id.toString() ?? "";
-        final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl]";
+        final String fileOriginalName = data['file_name'] ?? 'document';
+        final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl|$fileOriginalName]";
 
         _addNewMessageToUi({
           'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
@@ -1228,6 +1273,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     );
   }
 
+  String _formatOfflineTime(String? lastSeenIso) {
+    if (lastSeenIso == null || lastSeenIso.isEmpty) return "offline";
+
+    try {
+      String timeString = lastSeenIso.trim();
+
+      // Якщо формат з бази "YYYY-MM-DD HH:mm:ss", замінюємо пробіл на 'T' для коректного парсингу
+      if (timeString.contains(' ') && !timeString.contains('T')) {
+        timeString = timeString.replaceFirst(' ', 'T');
+      }
+
+      // Якщо немає жодної часової зони чи 'Z', примусово додаємо 'Z' (узгоджуємо з UTC)
+      if (!timeString.contains('Z') && !timeString.contains('+') && !timeString.contains(RegExp(r'-\d{2}:\d{2}'))) {
+        timeString += 'Z';
+      }
+
+      DateTime lastSeenTime = DateTime.parse(timeString).toLocal();
+      Duration difference = DateTime.now().difference(lastSeenTime);
+
+      // Додаємо захист від мінусової різниці (якщо годинники трохи розходяться)
+      if (difference.isNegative) {
+        return "offline just now";
+      }
+
+      if (difference.inMinutes < 1) {
+        return "offline just now";
+      } else if (difference.inMinutes < 60) {
+        int minutes = difference.inMinutes;
+        return "offline $minutes minute${minutes == 1 ? '' : 's'}";
+      } else if (difference.inHours < 24) {
+        int hours = difference.inHours;
+        return "offline $hours hour${hours == 1 ? '' : 's'}";
+      } else {
+        int days = difference.inDays;
+        return "offline $days day${days == 1 ? '' : 's'}";
+      }
+    } catch (e) {
+      debugPrint("Помилка парсингу last_seen: $e");
+      return "offline";
+    }
+  }
+
   Widget _buildHeader(String initial) {
     if (_isSearching) {
       return Padding(
@@ -1323,11 +1410,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
                 ),
               ),
               const SizedBox(width: 8),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.friendName, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                Text(_isTyping ? "typing..." : (_isConnected ? "online" : "connecting..."),
-                    style: TextStyle(color: _isTyping ? Colors.white : (_isConnected ? const Color(0xFF00F5A0) : Colors.orange), fontSize: 10)),
-              ]),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.friendName, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  Text(
+                    _isTyping
+                        ? "typing..."
+                        : (!_isConnected
+                        ? "connecting..."
+                        : (_isFriendOnline ? "online" : _formatOfflineTime(_friendLastSeen))), // Якщо сокет лежить -> "connecting...", якщо живий -> показуємо реальний статус гравця
+                    style: TextStyle(
+                      color: _isTyping
+                          ? Colors.white
+                          : (!_isConnected
+                          ? Colors.orange
+                          : (_isFriendOnline ? const Color(0xFF00F5A0) : const Color(0xFF8E8EA9))),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
           PopupMenuButton<String>(
@@ -2067,29 +2170,62 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     }
 
     if (cleanText.startsWith('[FILE:') && cleanText.endsWith(']')) {
-      final String fileUrl = cleanText.substring(6, cleanText.length - 1);
-      final String fileName = fileUrl.split('/').last;
+      // Витягуємо вміст всередині квадратних дужок після [FILE:
+      final String innerContent = cleanText.substring(6, cleanText.length - 1);
+
+      String fileUrl = innerContent;
+      String fileName = "Document";
+
+      // Якщо у нас збережено у форматі "url|name"
+      if (innerContent.contains('|')) {
+        final parts = innerContent.split('|');
+        fileUrl = parts[0];
+        fileName = parts.length > 1 ? parts[1] : parts[0].split('/').last;
+      } else {
+        fileName = fileUrl.split('/').last;
+      }
+
       final Color baseTextColor = widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white;
 
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.insert_drive_file, color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), size: 24),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              "File: $fileName",
-              style: TextStyle(
-                color: baseTextColor,
-                decoration: TextDecoration.underline,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                fontFamily: 'Inter',
+      final String fullUrl = fileUrl.startsWith('http')
+          ? fileUrl
+          : '${ApiConfig.baseUrl}${fileUrl.startsWith('/') ? fileUrl : '/$fileUrl'}';
+
+      return GestureDetector(
+        onTap: () async {
+          debugPrint("Клік на файл: $fullUrl");
+          final Uri uri = Uri.parse(fullUrl);
+
+          // Спеціальний режим для мобільних додатків, щоб файл відкривався/скачувався зовнішнім браузером або системою
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(
+              uri,
+              mode: LaunchMode.externalApplication, // Відкриває у зовнішньому браузері/системній програмі завантаження
+            );
+          } else {
+            debugPrint("Не вдалося відкрити посилання: $fullUrl");
+          }
+        },
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.insert_drive_file, color: widget.message.isMe ? const Color(0xFF0F0F1A) : const Color(0xFF00F5A0), size: 24),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                fileName, // <--- Тепер тут буде справжня назва файлу, а не айдішнік!
+                style: TextStyle(
+                  color: baseTextColor,
+                  decoration: TextDecoration.underline,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  fontFamily: 'Inter',
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
-              overflow: TextOverflow.ellipsis,
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
 

@@ -54,6 +54,8 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
   Map<String, dynamic>? _messageToReply;
   bool _isTyping = false;
 
+  late final Function(String, bool) _statusListener;
+
   // Використовуємо контролери пакета scrollable_positioned_list
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
@@ -80,6 +82,7 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
   int _currentFoundIndex = -1;
 
   Map<String, dynamic>? _groupData;
+  Map<String, dynamic>? _pinnedMessage;
 
   @override
   void initState() {
@@ -94,6 +97,24 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
     final myId = UserSession().currentUser?.id.toString() ?? "";
     ChatManager().init(myId);
     ChatManager().joinChat(widget.chatId);
+
+    _statusListener = (userId, isOnline) {
+      if (!mounted) return;
+      if (_groupData != null && _groupData!['members'] != null) {
+        setState(() {
+          List members = _groupData!['members'];
+          for (var member in members) {
+            final memberId = (member['id'] ?? member['user_id'])?.toString();
+            if (memberId == userId) {
+              member['is_online'] = isOnline;
+              print("🔄 [GROUP_REALTIME_STATUS] Учасник $userId змінив статус на: $isOnline");
+              break;
+            }
+          }
+        });
+      }
+    };
+    ChatManager().addStatusListener(_statusListener);
 
     // Передаємо unreadCount у завантаження історії
     _loadHistory(widget.chatId, unreadCount: widget.unreadCount);
@@ -218,6 +239,7 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
   @override
   void dispose() {
+    ChatManager().removeStatusListener(_statusListener); // <--- Обов'язково відписуємось
     _textController.dispose();
     _focusNode.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -253,9 +275,11 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
         headers: await ApiService.getHeaders(),
       );
       if (response.statusCode == 200) {
+        final data = json.decode(response.body); // Зберігаємо в змінну
         setState(() {
-          _groupData = json.decode(response.body);
-          _groupName = _groupData?['name']; // Оновлюємо назву з бази
+          _groupData = data;
+          _groupName = data['name'];
+          _pinnedMessage = data['pinned_message']; // <--- ДОДАЙ ЦЕЙ РЯДОК
         });
       }
     } catch (e) { debugPrint("Помилка завантаження інфо: $e"); }
@@ -326,7 +350,7 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
   }
 
   Future<void> _pickAndSendFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(withData: true);
+    FilePickerResult? result = await FilePicker.pickFiles(withData: true);
 
     if (result != null && result.files.single.path != null) {
       final file = result.files.single;
@@ -374,7 +398,8 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
         final String fileUrl = data['file_url'];
 
         final String myId = UserSession().currentUser?.id.toString() ?? "";
-        final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl]";
+        final String fileOriginalName = data['file_name'] ?? 'document';
+        final String content = isImage ? "[IMAGE:$fileUrl]" : "[FILE:$fileUrl|$fileOriginalName]";
         final String tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
 
         _addNewMessageToUi({
@@ -566,6 +591,9 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
     final DateTime time = _parseDateTime(messageData['created_at'] ?? DateTime.now());
     final String serverMessageId = messageData['id']?.toString() ?? '';
 
+    // 🎯 Оголошуємо myId одразу тут
+    final String myId = UserSession().currentUser?.id.toString() ?? "";
+
     setState(() {
       // Шукаємо недавнє локальне повідомлення з тимчасовим ID (temp_)
       final int existingIndex = _messages.indexWhere((m) =>
@@ -578,12 +606,10 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
         _messages[existingIndex]['id'] = serverMessageId;
         _messages[existingIndex]['status'] = messageData['status'] ?? 'sent';
       } else {
-        // ПЕРЕВІРКА ТІЛЬКИ ЗА ID (прибрано конфлікт з однаковим текстом)
         final bool isDuplicate = _messages.any((m) => m['id'].toString() == serverMessageId);
 
         if (isDuplicate) return;
 
-        final String myId = UserSession().currentUser?.id.toString() ?? "";
         final String myNickname = UserSession().currentUser?.nickname ?? "You";
 
         String nickname = messageData['sender_nickname'] ?? '';
@@ -607,6 +633,12 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
       _messages.sort((a, b) => a['time'].compareTo(b['time']));
     });
+
+    // 🚀 Автоматичне прочитання
+    if (senderId != myId && widget.chatId.isNotEmpty) {
+      print("🚀 [GROUP AUTO-READ] Автоматично позначаємо нове повідомлення $serverMessageId як прочитане.");
+      _markAsReadOnServer(widget.chatId, lastMessageId: serverMessageId);
+    }
   }
 
   Future<void> _handleInitialScroll() async {
@@ -657,21 +689,19 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final int serverUnread = data['unread_count'] ?? 0; // 🎯 Беремо правду напряму з бека!
+        final int serverUnread = data['unread_count'] ?? 0;
 
         final String myId = UserSession().currentUser?.id.toString() ?? "";
         setState(() {
           final int targetIndex = _messages.indexWhere((m) => m['id'].toString() == lastMessageId);
 
-          // Просто оновлюємо статус на 'read' для локальних повідомлень
           for (int i = 0; i <= targetIndex && i < _messages.length; i++) {
             var msg = _messages[i];
-            if (msg['sender_id'] != myId && msg['status'] != 'read') {
-              msg['status'] = 'read';
+            if (msg['sender_id'] == myId && msg['status'] != 'read') {
+              msg['status'] = 'read'; // Твої повідомлення стають фіолетовими, коли група доскролила до них
             }
           }
 
-          // 🛡️ ЖОРСТКО синхронізуємо локальний залишок з тим, що вирішив бекенд
           _remainingUnread = serverUnread;
           if (_remainingUnread <= 0) {
             _showScrollDownButton = false;
@@ -681,6 +711,65 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
     } catch (e) {
       debugPrint("Помилка read: $e");
     }
+  }
+
+  Future<void> _togglePinMessage(String messageId, bool isPinning) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/chats/${widget.chatId}/pin'),
+        headers: await ApiService.getHeaders(),
+        body: json.encode({'message_id': isPinning ? messageId : null}),
+      );
+      if (response.statusCode == 200) {
+        setState(() {
+          if (isPinning) {
+            final msg = _messages.firstWhere((m) => m['id'].toString() == messageId, orElse: () => {});
+            if (msg.isNotEmpty) {
+              _pinnedMessage = {
+                'id': msg['id'],
+                'content': msg['content'],
+                'sender_nickname': msg['sender_nickname'] ?? 'Member'
+              };
+            }
+          } else {
+            _pinnedMessage = null;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Помилка піну: $e");
+    }
+  }
+
+  void _showUnpinConfirmationDialog(String messageId) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF181826),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF2B2B3B))),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Unpin message?", style: TextStyle(color: Colors.white, fontSize: 16, fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+              GestureDetector(onTap: () => Navigator.pop(context), child: const Icon(Icons.close, color: Color(0xFF8E8EA9), size: 20)),
+            ],
+          ),
+          content: const Text("Are you sure you want to unpin this message?", style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 14, fontFamily: 'Inter')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("No", style: TextStyle(color: Color(0xFF8E8EA9), fontWeight: FontWeight.bold))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5A0), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              onPressed: () {
+                Navigator.pop(context);
+                _togglePinMessage(messageId, false);
+              },
+              child: const Text("Yes", style: TextStyle(color: Color(0xFF0F0F1A), fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _handleMessageAction(String action, Map<String, dynamic> message) {
@@ -718,6 +807,10 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
       });
     } else if (action == 'Like') {
       _toggleReaction(message['id'].toString());
+    } else if (action == 'Pin') {
+      _togglePinMessage(message['id'].toString(), true);
+    } else if (action == 'Unpin') {
+      _showUnpinConfirmationDialog(message['id'].toString());
     }
   }
 
@@ -805,6 +898,7 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
             Column(
               children: [
                 _buildHeader(displayName),
+                if (_pinnedMessage != null) _buildPinnedMessageBanner(),
                 Expanded(
                   child: Stack(
                     children: [
@@ -844,6 +938,7 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
                             isHighlighted: isHighlighted,
                             likesCount: msg['likes_count'] ?? 0,
                             isLikedByMe: msg['is_liked_by_me'] ?? false,
+                            pinnedMessage: _pinnedMessage,
                             message: GroupChatMessage(
                               id: msgId,
                               content: msg['content']?.toString() ?? "",
@@ -1068,6 +1163,38 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
       );
     }
 
+    int onlineCount = 0;
+    int totalMembers = 0;
+
+    final String myId = UserSession().currentUser?.id.toString() ?? "";
+    print("🕵️ [ONLINE_DETECTIVE] Мій поточний ID з UserSession: '$myId' (тип: ${myId.runtimeType})");
+
+    if (_groupData != null && _groupData!['members'] != null) {
+      final List members = _groupData!['members'];
+      totalMembers = members.length;
+      print("🕵️ [ONLINE_DETECTIVE] Всього учасників у групі: $totalMembers");
+
+      onlineCount = members.where((m) {
+        final memberId = (m['id'] ?? m['user_id'])?.toString() ?? "";
+        final bool serverIsOnline = m['is_online'] == true;
+        final String nickname = m['nickname'] ?? m['name'] ?? 'Unknown';
+
+        // Жорстка перевірка на совпадіння ID (провіримо чи це я)
+        final bool isMe = (memberId == myId);
+
+        // Хто вважається онлайн: або це я, або сервер каже що він true
+        final bool finalOnlineState = isMe || serverIsOnline;
+
+        print("🕵️ [ONLINE_DETECTIVE] - Учасник: '$nickname' (ID: '$memberId') | Сервер каже is_online: $serverIsOnline | Це я? $isMe => Враховуємо як онлайн: $finalOnlineState");
+
+        return finalOnlineState;
+      }).length;
+
+      print("🕵️ [ONLINE_DETECTIVE] ✅ Загальний підсумок onlineCount: $onlineCount");
+    } else {
+      print("🕵️ [ONLINE_DETECTIVE] ⚠️ _groupData або _groupData['members'] ще порожні!");
+    }
+
     // --- ЗВИЧАЙНИЙ РЕЖИМ ---
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 57, 12, 0),
@@ -1105,7 +1232,9 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
                     Text(
                       _isTyping
                           ? "typing..."
-                          : (_groupData != null ? "${(_groupData!['members'] as List).length} members | 1 online" : "group"),
+                          : (_groupData != null
+                          ? "$totalMembers members | $onlineCount online"
+                          : "group"),
                       style: TextStyle(
                         color: _isTyping ? Colors.white : const Color(0xFFA0A0B0),
                         fontSize: 10,
@@ -1364,6 +1493,72 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
       ],
     );
   }
+
+  Widget _buildPinnedMessageBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFF181826),
+        border: Border(bottom: BorderSide(color: Color(0xFF2B2B3B), width: 1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.push_pin, color: Color(0xFF00F5A0), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: () async {
+                if (_pinnedMessage == null) return;
+                final pinnedId = _pinnedMessage!['id'].toString();
+
+                // 1. Шукаємо індекс у поточному списку
+                int index = _messages.indexWhere((m) => m['id'].toString() == pinnedId);
+
+                // 2. Якщо його немає в пам'яті (старе повідомлення) — підвантажуємо історію вгору
+                while (index == -1 && _hasMoreMessages && !_isLoadingMore) {
+                  await _loadHistory(widget.chatId, isLoadMore: true);
+                  index = _messages.indexWhere((m) => m['id'].toString() == pinnedId);
+                }
+
+                // 3. Коли знайшли або воно вже було — скролимо до нього
+                if (index != -1 && _itemScrollController.isAttached) {
+                  int targetIndex = _messages.length - 1 - index;
+                  _itemScrollController.scrollTo(
+                    index: targetIndex,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    alignment: 0.5,
+                  );
+                } else {
+                  _showErrorSnackBar("Pinned message is not available");
+                }
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _pinnedMessage!['sender_nickname'] ?? "Pinned Message",
+                    style: const TextStyle(color: Color(0xFF00F5A0), fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    _pinnedMessage!['content'] ?? "",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _showUnpinConfirmationDialog(_pinnedMessage!['id'].toString()),
+            child: const Icon(Icons.close, color: Color(0xFF8E8EA9), size: 18),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // --- ДОПОМІЖНІ КЛАСИ ТА ВІДЖЕТИ ДЛЯ ГРУПИ (Щоб не конфліктувати з ChatRoomScreen) ---
@@ -1408,6 +1603,7 @@ class GroupChatMessageWidget extends StatefulWidget {
   final int currentMatchIndex;
   final int messageIndex;
   final List<Map<String, dynamic>> foundMatches;
+  final Map<String, dynamic>? pinnedMessage;
 
   const GroupChatMessageWidget({
     super.key, required this.message, required this.likesCount, required this.isLikedByMe,
@@ -1417,6 +1613,7 @@ class GroupChatMessageWidget extends StatefulWidget {
     required this.currentMatchIndex,
     required this.messageIndex,
     required this.foundMatches,
+    this.pinnedMessage,
   });
 
   @override
@@ -1463,7 +1660,7 @@ class _GroupChatMessageWidgetState extends State<GroupChatMessageWidget> {
                 child: CompositedTransformTarget(
                   link: _layerLink,
                   child: GestureDetector(
-                    onLongPress: () => _showBlurActions(context, widget.message.isMe),
+                    onLongPress: () => _showBlurActions(context, widget.message.isMe, widget.pinnedMessage),
                     child: _buildMessageContainer(),
                   ),
                 ),
@@ -1570,19 +1767,26 @@ class _GroupChatMessageWidgetState extends State<GroupChatMessageWidget> {
     );
   }
 
-  void _showBlurActions(BuildContext context, bool isMe) {
+  void _showBlurActions(BuildContext context, bool isMe, Map<String, dynamic>? pinnedMessage) {
     final RenderBox? renderBox = _messageKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
     final position = renderBox.localToGlobal(Offset.zero);
     final size = renderBox.size;
     final screenHeight = MediaQuery.of(context).size.height;
 
+    // 🎯 Визначаємо, чи запінене саме це повідомлення зараз
+    final bool isThisPinned = pinnedMessage != null && pinnedMessage['id']?.toString() == widget.message.id;
+
     List<Map<String, dynamic>> menuItems = [
       {"title": "Reply", "icon": const FigmaReplyIcon(), "color": const Color(0xFF00F5A0)},
       {"title": "Copy", "icon": const FigmaCopyIcon(), "color": const Color(0xFF00F5A0)},
       {"title": "Forward", "icon": const FigmaForwardIcon(), "color": const Color(0xFF00F5A0), "isForward": true},
-      // Форвард поки закоментував, бо потрібен імпорт ChatForwardScreen. Якщо він є, розкоментуй:
-      // {"title": "Forward", "icon": const FigmaForwardIcon(), "color": const Color(0xFF00F5A0), "isForward": true},
+      // 📌 Додаємо динамічний пункт Pin / Unpin
+      {
+        "title": isThisPinned ? "Unpin" : "Pin",
+        "icon": const Icon(Icons.push_pin, size: 16, color: Color(0xFF00F5A0)),
+        "color": const Color(0xFF00F5A0)
+      },
     ];
 
     if (isMe) {
@@ -1726,8 +1930,18 @@ class _GroupChatMessageWidgetState extends State<GroupChatMessageWidget> {
     }
 
     if (cleanText.startsWith('[FILE:') && cleanText.endsWith(']')) {
-      final String fileUrl = cleanText.substring(6, cleanText.length - 1);
-      final String fileName = fileUrl.split('/').last;
+      final String innerContent = cleanText.substring(6, cleanText.length - 1);
+      String fileUrl = innerContent;
+      String fileName = "Document";
+
+      if (innerContent.contains('|')) {
+        final parts = innerContent.split('|');
+        fileUrl = parts[0];
+        fileName = parts.length > 1 ? parts[1] : parts[0].split('/').last;
+      } else {
+        fileName = fileUrl.split('/').last;
+      }
+
       final Color baseTextColor = widget.message.isMe ? const Color(0xFF0F0F1A) : Colors.white;
 
       return Row(
@@ -1737,7 +1951,7 @@ class _GroupChatMessageWidgetState extends State<GroupChatMessageWidget> {
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              "File: $fileName",
+              fileName,
               style: TextStyle(
                 color: baseTextColor,
                 decoration: TextDecoration.underline,

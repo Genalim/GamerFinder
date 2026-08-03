@@ -104,6 +104,7 @@ class UserProfileResponse(BaseModel):
     avatar: Optional[str] = None
     is_pro: bool
     is_online: bool
+    last_seen: Optional[datetime] = None
     rating: float
     voice_chat: bool
 

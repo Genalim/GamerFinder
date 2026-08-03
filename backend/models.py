@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Float, DateTime, func, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -15,16 +15,34 @@ class User(Base):
     avatar = Column(String, nullable=True)
     timezone_offset = Column(Integer, default=0)
     voice_chat = Column(Boolean, default=False)
-    is_online = Column(Boolean, default=False)
+
+    # ⚠️ Зберігаємо колонку в базі під капотом, але назвемо її _is_online,
+    # щоб вона не конфліктувала з нашим динамічним property
+    _is_online = Column("is_online", Boolean, default=False)
+
+    last_seen = Column(DateTime, nullable=True)
     is_pro = Column(Boolean, default=False)
-    pro_trial_used = Column(Boolean, default=False) # Флаг для тріалу (Кейс 1)
+    pro_trial_used = Column(Boolean, default=False)
     pro_expiry_date = Column(DateTime, nullable=True)
     pro_trial_dismissed_at = Column(DateTime, nullable=True)
     rating = Column(Float, default=0.0)
     is_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
 
-    # Зв'язки (дозволяють робити user.availability тощо)
+    # 🚀 ДИНАМІЧНИЙ СТАТУС ОНЛАЙН
+    @property
+    def is_online(self) -> bool:
+        if not self.last_seen:
+            return False
+        # Якщо з моменту останнього пінгу пройшло менше 2 хвилин — гравець в мережі
+        return datetime.utcnow() - self.last_seen < timedelta(minutes=2)
+
+    @is_online.setter
+    def is_online(self, value: bool):
+        # Дозволяємо SQLAlchemy записувати значення, якщо це десь потрібно в коді
+        self._is_online = value
+
+    # Зв'язки...
     availability = relationship("UserAvailability", backref="user")
     platforms = relationship("UserPlatforms", backref="user")
     languages = relationship("UserLanguages", backref="user")
@@ -135,7 +153,7 @@ class RatingRequest(Base):
 #Chats
 class Chat(Base):
     __tablename__ = 'chats'
-    __table_args__ = {'extend_existing': True}  # <--- Додай це
+    __table_args__ = {'extend_existing': True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=True)
@@ -145,6 +163,9 @@ class Chat(Base):
     admin_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     avatar_url = Column(String, nullable=True)
     description = Column(String, nullable=True)
+
+    # 🆕 ДОДАЄМО ПОЛЕ ДЛЯ ЗАКРІПЛЕНОГО ПОВІДОМЛЕННЯ
+    pinned_message_id = Column(UUID(as_uuid=True), ForeignKey('messages.id', ondelete="SET NULL"), nullable=True)
 
 class ChatMember(Base):
     __tablename__ = 'chat_members'
@@ -183,6 +204,8 @@ class MessageReaction(Base):
     reaction_type = Column(String, default='like')
     created_at = Column(DateTime, default=datetime.utcnow)
     message = relationship("Message", back_populates="reactions")
+
+
 
 class ChatHidden(Base):
     __tablename__ = 'chat_hidden'

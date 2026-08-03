@@ -226,7 +226,21 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
                   style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
-              Text("$memberCount members | 1 online", style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 12)),
+              Builder(
+                builder: (context) {
+                  int onlineCount = 0;
+                  final membersList = _groupData!['members'] as List<dynamic>? ?? [];
+                  final String myId = UserSession().currentUser?.id.toString() ?? "";
+
+                  onlineCount = membersList.where((m) {
+                    final memberId = (m['id'] ?? m['user_id'])?.toString();
+                    if (memberId == myId) return true;
+                    return m['is_online'] == true;
+                  }).length;
+
+                  return Text("$memberCount members | $onlineCount online", style: const TextStyle(color: Color(0xFF8E8EA9), fontSize: 12));
+                },
+              ),
             ],
           ),
 
@@ -286,7 +300,12 @@ class _GroupInfoScreenState extends State<ChatGroupInfoScreen> {
                       onTap: () => GamerProfileScreen.openFromId(context, member['id'].toString()),
                       child: Container(
                         width: 24, height: 24,
-                        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFF00F5A0).withOpacity(0.4), width: 1)),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: (member['is_online'] == true || isAdminMe(member['id']))
+                              ? Border.all(color: const Color(0xFF00F5A0), width: 1.5)
+                              : null, // Якщо офлайн — ніякого обідка
+                        ),
                         child: ClipOval(child: buildAvatar(member['avatar'], initial, 24)),
                       ),
                     ),

@@ -12,6 +12,7 @@ import 'package:flutter/scheduler.dart';
 import 'services/chat_manager.dart';
 import 'main.dart';
 import 'group_chat_room_screen.dart';
+import 'package:intl/intl.dart';
 
 class ChatItem {
   final String id;
@@ -53,12 +54,34 @@ class ChatItem {
     if (json.containsKey('is_online') && json['is_online'] != null) {
       onlineStatus = json['is_online'] == true;
     }
-    debugPrint("DEBUG: Вхідний JSON: $json");
+
+    // 🕒 Парсимо і конвертуємо час у локальний часовий пояс (+3 години)
+    String formattedTime = '';
+    final rawTime = json['last_message_time'];
+    if (rawTime != null && rawTime.toString().isNotEmpty) {
+      try {
+        String timeString = rawTime.toString();
+        // Якщо це не повна дата, а просто "HH:mm", залишаємо як є,
+        // але якщо це ISO рядок від бекенда — перетворюємо у локальний час:
+        if (timeString.contains('T') || timeString.contains('-')) {
+          if (!timeString.contains('Z') && !timeString.contains('+')) {
+            timeString += 'Z';
+          }
+          DateTime parsedDate = DateTime.parse(timeString).toLocal();
+          formattedTime = DateFormat('HH:mm').format(parsedDate);
+        } else {
+          formattedTime = timeString; // Якщо бекенд прислав старий формат
+        }
+      } catch (e) {
+        formattedTime = rawTime.toString();
+      }
+    }
+
     return ChatItem(
       id: json['chat_id']?.toString() ?? json['id']?.toString() ?? '',
       title: json['title'] ?? 'Unknown',
       lastMessage: json['last_message'] ?? '',
-      time: json['last_message_time'] ?? '',
+      time: formattedTime, // <--- Використовуємо відформатований локальний час!
       unreadCount: json['unread_count'] ?? 0,
       isPro: json['is_pro'] ?? false,
       isGroupChat: json['is_group'] ?? false,
@@ -135,11 +158,19 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
     // 1. Реєструємо функцію для примусового оновлення
     ChatListWidget.onRefreshRequested = _fetchChats;
 
-    // 2. Залишаємо підписки на сокети (це важливо для реактивності)
-    ChatManager().socket?.on('new_chat_created', (data) {
-      debugPrint("DEBUG: Прийшла подія про новий чат!");
-      _fetchChats();
-    });
+    // 🚀 2. Прив'язуємо оновлення списку чатів до ChatManager
+    ChatManager().onNewMessageReceived = () {
+      if (mounted) {
+        debugPrint("DEBUG: ChatManager сповістив про нове повідомлення, оновлюємо список чатів!");
+        _fetchChats();
+      }
+    };
+
+    ChatManager().onChatListNeedsRefresh = () {
+      if (mounted) {
+        _fetchChats(); // Метод, який перезавантажує список чатів з бекенду
+      }
+    };
 
     ChatManager().socket?.on('new_message', (data) {
       debugPrint("DEBUG: Прийшло нове повідомлення!");
@@ -156,7 +187,7 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
 
     // 4. Очищаємо підписки на сокети
     ChatManager().socket?.off('new_chat_created');
-    ChatManager().socket?.off('new_message');
+    ChatManager().onNewMessageReceived = null;
 
     routeObserver.unsubscribe(this);
     super.dispose();

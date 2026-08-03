@@ -81,19 +81,30 @@ class _ChatAddFriendsGroupScreenState extends State<ChatAddFriendsGroupScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               child: Container(
                 height: 40,
-                decoration: BoxDecoration(color: const Color(0xFF181826), borderRadius: BorderRadius.circular(10)),
-                child: TextField(
-                  onChanged: (value) => setState(() => _searchQuery = value),
-                  textAlignVertical: TextAlignVertical.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: const InputDecoration(
-                    prefixIcon: SizedBox(width: 40, child: Center(child: FigmaSearchIcon())),
-                    hintText: 'Search friends...',
-                    hintStyle: TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
-                    border: InputBorder.none,
-                    isCollapsed: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 12),
-                  ),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF181826),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const FigmaSearchIcon(),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        onChanged: (value) => setState(() => _searchQuery = value),
+                        textAlignVertical: TextAlignVertical.center,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: const InputDecoration(
+                          hintText: 'Search friends...',
+                          hintStyle: TextStyle(color: Color(0xFFA3A3B5), fontSize: 14),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

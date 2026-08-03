@@ -80,9 +80,10 @@ class _SignInScreenState extends State<SignInScreen> {
 
         if (mounted) {
           // Ми не скидаємо _isLoading = false, бо екран перестане існувати
-          Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => MainNavigationScreen())
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => MainNavigationScreen()),
+                (route) => false, // Повністю очищає весь стек (екран логіну та попередні зникають назавжди)
           );
         }
       } else {
@@ -94,10 +95,22 @@ class _SignInScreenState extends State<SignInScreen> {
       }
     } catch (e) {
       print("ERROR: $e");
-      // Скидаємо тут, бо ми залишаємося на цьому ж екрані
+
+      // 🛡️ Перевіряємо, чи це помилка мережі / відсутності зв'язку з сокетом чи сервером
+      String displayMessage = 'No connection to server';
+
+      // Якщо це якась інша логічна помилка, можна залишити деталі,
+      // але для SocketException / Timeout виводимо короткий текст:
+      if (!e.toString().contains('SocketException') &&
+          !e.toString().contains('TimeoutException') &&
+          !e.toString().contains('Failed host lookup')) {
+        // Якщо це не суто мережева помилка, виводимо текст оригінальної або скорочуємо
+        displayMessage = 'Error: No connection to server';
+      }
+
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Error: $e';
+        _errorMessage = displayMessage; // <--- Тепер тут буде короткий текст замість портів 8000
       });
     }
   }

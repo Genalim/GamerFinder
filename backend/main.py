@@ -166,6 +166,19 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     for style in user_data.play_styles:
         db.add(UserStyles(user_id=new_user.id, style=style))
 
+    # 🆕 Створюємо нотифікацію про доступність PRO-тріалу одразу при реєстрації
+    if not new_user.is_pro and not new_user.pro_trial_used:
+        trial_notif = Notification(
+            id=str(uuid.uuid4()),
+            recipient_id=new_user.id,
+            sender_id=new_user.id,
+            message="Try PRO for free for 7 days!",
+            type="pro",
+            state="pending",
+            game="trial_available",
+            created_at=datetime.utcnow()
+        )
+        db.add(trial_notif)
 
     # Фіксуємо зміни в базі
     await db.commit()
@@ -432,7 +445,8 @@ async def get_games(db: AsyncSession = Depends(get_db)):
 @app.get("/find-matches", response_model=List[UserProfileResponse])
 async def find_matches(
         current_user_id: int,
-        excluded_ids: Optional[List[int]] = Query(None), # Параметр для "живого" рефрешу
+        excluded_ids: Optional[List[int]] = Query(None),
+        selected_game_id: Optional[int] = Query(None), # 🆕 Приймаємо ID обраної гри з фільтра
         db: AsyncSession = Depends(get_db)
 ):
     # 1. Завантажуємо поточного юзера з його уподобаннями
@@ -453,9 +467,7 @@ async def find_matches(
     my_platforms = [p.platform for p in me.platforms]
     my_times = [a.utc_hour for a in me.availability]
 
-    # 2. Список тих, кого треба виключити (друзі + заблоковані + я сам + ті, кого вже бачили)
-    # Збираємо ID друзів та заблокованих
-    # А. Ті, з ким ви вже друзі або кого ви заблокували (або хто вас)
+    # 2. Список тих, кого треба виключити
     excluded_subquery = select(
         case(
             (Friendship.user_id == current_user_id, Friendship.friend_id),
@@ -463,11 +475,9 @@ async def find_matches(
         )
     ).filter(
         or_(Friendship.user_id == current_user_id, Friendship.friend_id == current_user_id),
-        # Виключаємо всіх, з ким є зв'язок (друзі) або статус 'blocked'
         Friendship.status.in_(['accepted', 'blocked'])
     ).scalar_subquery()
-    # Б. ВАЖЛИВО: Окремо перевіримо статус, якщо ви є "ініціатором" або "отримувачем" блокування
-    # (Це для того, щоб виключити тих, хто вас заблокував)
+
     blocked_by_others_subquery = select(
         case(
             (Friendship.friend_id == current_user_id, Friendship.user_id),
@@ -478,8 +488,7 @@ async def find_matches(
         Friendship.status == 'blocked'
     ).scalar_subquery()
 
-    # 3. Рахуємо бали (Match Score)
-    # Робимо це як обчислювану колонку, що базується на підзапитах для кожної таблиці зв'язків
+    # 3. Бали матчу
     match_score = (
             (select(func.count(UserGames.game_id)).filter(UserGames.user_id == User.id, UserGames.game_id.in_(my_game_ids)).scalar_subquery() * 100) +
             case((User.is_online == True, 60), else_=0) +
@@ -489,20 +498,26 @@ async def find_matches(
             (select(func.count(UserAvailability.utc_hour)).filter(UserAvailability.user_id == User.id, UserAvailability.utc_hour.in_(my_times)).scalar_subquery() * 10)
     ).label("match_score")
 
-    # 4. Формуємо динамічний список фільтрів
+    # 4. 🔥 ГОЛОВНА ЗМІНА ФІЛЬТРІВ:
+    # Якщо користувач обрав конкретну гру у верхньому фільтрі — шукаємо ТІЛЬКИ по ній!
+    if selected_game_id:
+        target_game_ids = [selected_game_id]
+    else:
+        target_game_ids = my_game_ids # За замовчуванням — усі мої ігри
+
     filters = [
         User.id != current_user_id,
         User.is_active == True,
         ~User.id.in_(excluded_subquery),
         ~User.id.in_(blocked_by_others_subquery),
-        User.id.in_(select(UserGames.user_id).filter(UserGames.game_id.in_(my_game_ids)))
+        # Тепер перевіряємо наявність гри(ігор) з урахуванням вибору фільтра
+        User.id.in_(select(UserGames.user_id).filter(UserGames.game_id.in_(target_game_ids)))
     ]
 
-    # Додаємо фільтр excluded_ids тільки якщо він прийшов не порожнім
     if excluded_ids:
         filters.append(~User.id.in_(excluded_ids))
 
-    # 5. Основний запит з динамічними фільтрами
+    # 5. Запит до бази
     stmt = (
         select(User)
         .options(
@@ -513,22 +528,15 @@ async def find_matches(
             selectinload(User.games).joinedload(UserGames.game),
             selectinload(User.styles)
         )
-        .filter(*filters)  # Розпаковуємо наш список фільтрів
+        .filter(*filters)
         .order_by(desc(match_score), func.random())
         .limit(20)
     )
 
     result = await db.execute(stmt)
-
     user_list = result.scalars().all()
 
-    # --- ТУТ ДЕБАГ ---
-    for u in user_list:
-        print(f"DEBUG: Nickname={u.nickname}, DB Rating={u.rating}")
-
-    # Повертаємо змінну
     return user_list
-    return result.scalars().all()
 
 
 #@app.post("/friends/request")
@@ -1773,6 +1781,58 @@ async def mark_group_messages_up_to_as_read(
 
     return {"status": "ok", "updated_count": result.rowcount, "unread_count": remaining_unread}
 
+
+@app.patch("/chats/{chat_id}/pin")
+async def pin_message_in_chat(
+        chat_id: uuid.UUID,
+        data: dict,  # Очікуємо {"message_id": "uuid-повідомлення"} або ні, якщо відкріплюємо
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    # 1. Перевіряємо, чи існує чат і чи користувач є його учасником
+    member_check = await db.execute(
+        select(ChatMember).filter(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user_id
+        )
+    )
+    if not member_check.scalars().first():
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    chat = await db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    message_id_str = data.get("message_id")
+
+    if message_id_str:
+        message_id = uuid.UUID(message_id_str)
+        # Перевіряємо, чи повідомлення взагалі існує в цьому чаті
+        msg_check = await db.execute(
+            select(Message).filter(
+                Message.id == message_id,
+                Message.chat_id == chat_id
+            )
+        )
+        if not msg_check.scalars().first():
+            raise HTTPException(status_code=404, detail="Message not found in this chat")
+
+        chat.pinned_message_id = message_id
+    else:
+        # Якщо передали null або порожнє — відкріплюємо
+        chat.pinned_message_id = None
+
+    await db.commit()
+
+    # 2. Емітимо подію через Socket.IO на всю кімнату чату
+    await sio.emit('message_pinned', {
+        'chat_id': str(chat_id),
+        'pinned_message_id': str(chat.pinned_message_id) if chat.pinned_message_id else None
+    }, room=str(chat_id))
+
+    return {"status": "success", "pinned_message_id": str(chat.pinned_message_id) if chat.pinned_message_id else None}
+
+
 @app.patch("/messages/{message_id}/read")
 async def mark_single_message_as_read(
         message_id: uuid.UUID,
@@ -1866,14 +1926,20 @@ async def get_chats(
             for u in all_members[:4]
         ]
 
+        # Функція перевірки онлайну за остантонім пінгом (менше 2 хвилин)
+        def check_online(user):
+            if not user or not user.last_seen:
+                return False
+            return (datetime.utcnow() - user.last_seen) < timedelta(minutes=2)
+
         response.append({
             "chat_id": str(chat.id),
             "title": chat.name if chat.is_group else (others[0].nickname if others else "Unknown"),
             "last_message": last_msg.content if last_msg else "Початок чату",
-            "last_message_time": last_msg.created_at.strftime("%H:%M") if last_msg else "",
+            "last_message_time": last_msg.created_at.isoformat() if last_msg else "",
             "unread_count": unread_count,
             "is_pro": others[0].is_pro if (not chat.is_group and others) else False,
-            "is_online": others[0].is_online if (not chat.is_group and others) else False,
+            "is_online": check_online(others[0]) if (not chat.is_group and others) else False,
             "is_group": chat.is_group,
             "initials": [u.nickname[0].upper() for u in others[:4]],
             "last_message_status": last_msg.status if last_msg else "sent",
@@ -2126,6 +2192,23 @@ async def get_chat_info(
     chat = result.scalars().first()
     if not chat: raise HTTPException(status_code=404, detail="Chat not found")
 
+    # 📌 Шукаємо закріплене повідомлення, якщо воно є
+    pinned_message_data = None
+    if chat.pinned_message_id:
+        msg_res = await db.execute(
+            select(Message, User.nickname.label("sender_nickname"))
+            .outerjoin(User, Message.sender_id == User.id)
+            .filter(Message.id == chat.pinned_message_id)
+        )
+        row = msg_res.first()
+        if row:
+            msg, sender_nickname = row
+            pinned_message_data = {
+                "id": str(msg.id),
+                "content": msg.content,
+                "sender_nickname": sender_nickname or "Unknown"
+            }
+
     # Отримуємо учасників, тепер з даними про те, чи вони адміни
     stmt = select(User, ChatMember.is_admin).join(ChatMember).filter(ChatMember.chat_id == chat_id)
     res = await db.execute(stmt)
@@ -2147,7 +2230,8 @@ async def get_chat_info(
         "name": chat.name,
         "members": members_data,
         "is_me_admin": is_me_admin,
-        "avatar_url": chat.avatar_url
+        "avatar_url": chat.avatar_url,
+        "pinned_message": pinned_message_data
     }
 # Ендпоінт для оновлення назви групи
 @app.patch("/group_chats/{chat_id}/name")
@@ -2434,14 +2518,19 @@ async def upload_chat_file(
 
     os.makedirs("uploads/chat_files", exist_ok=True)
 
-    file_extension = file.filename.split(".")[-1] if "." in file.filename else "bin"
+    original_filename = file.filename or "file" # <--- Зберігаємо оригінальне ім'я
+    file_extension = original_filename.split(".")[-1] if "." in original_filename else "bin"
     unique_filename = f"{uuid.uuid4()}.{file_extension}"
     file_location = f"uploads/chat_files/{unique_filename}"
 
     with open(file_location, "wb") as buffer:
         buffer.write(contents)
 
-    return {"file_url": f"/uploads/chat_files/{unique_filename}"}
+    # Повертаємо і шлях, і оригінальну назву
+    return {
+        "file_url": f"/uploads/chat_files/{unique_filename}",
+        "file_name": original_filename
+    }
 
 @app.get("/chats/{chat_id}/search")
 async def search_messages_in_chat(
@@ -2476,6 +2565,28 @@ async def get_chat_unread_count(
     result = await db.execute(stmt)
     count = result.scalar() or 0
     return {"unread_count": count}
+
+@app.post("/users/ping")
+async def user_ping(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    user = await db.get(User, current_user_id)
+    if user:
+        was_offline = not user.is_online
+
+        user.is_online = True
+        user.last_seen = datetime.utcnow()
+        await db.commit()
+
+        # 🚀 Емітимо глобальну сокет-подію, щоб усі клієнти бачили актуальний онлайн
+        await sio.emit('user_status_changed', {
+            "user_id": current_user_id,
+            "is_online": True,
+            "last_seen": user.last_seen.isoformat()
+        })
+
+    return {"status": "ok"}
 
 app = socketio.ASGIApp(sio, app)
 if __name__ == "__main__":

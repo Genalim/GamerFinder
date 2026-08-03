@@ -36,6 +36,7 @@ class GamerProfile {
   final double rating;
   final String password;
   final int timezoneOffset;
+  final String? lastSeen;
 
   GamerProfile({
     required this.id,
@@ -58,6 +59,7 @@ class GamerProfile {
     this.rating = 0,
     required this.password,
     this.timezoneOffset = 0,
+    this.lastSeen,
   });
   ///Перероблюємо години у назви частини доби для відображення.
   String get readablePlayTime {
@@ -118,6 +120,7 @@ class GamerProfile {
       languages: (json['languages'] as List?)?.map((l) => l['lang'].toString()).toList() ?? [],
       hasVoice: json['voice_chat'] == true,
       isOnline: json['is_online'] == true,
+      lastSeen: json['last_seen']?.toString(),
       platformsList: (json['platforms'] as List?)?.map((p) => p['platform'].toString()).toList() ?? [],
       connectedPlatforms: (json['accounts'] as List?)?.fold<Map<String, String>>({}, (map, item) {
         map[item['service'].toString()] = item['username'].toString();
@@ -278,6 +281,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   @override
   bool get wantKeepAlive => true; // Кажемо Flutter "тримай цей екран у пам'яті"
 
+  int? _selectedGameId;
+
 
   Future<void> _loadUserProfile() async {
     try {
@@ -355,13 +360,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   @override
   void initState() {
     super.initState();
-    //Clean the matchs
     AppState.shownIds.clear();
-    // Викликаємо дані лише якщо вони порожні
+
     if (UserSession().currentUser == null) {
       _loadUserProfile();
     } else if (_loadedGamers.isEmpty) {
-      _loadGamers(); // Якщо профіль є, а матчів немає — завантажуємо
+      _loadGamers();
     }
 
     _fetchNotifications();
@@ -372,9 +376,54 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     ChatManager().socket?.on('new_notification', (data) {
       debugPrint("DEBUG: Прийшла нова нотифікація через сокет: $data");
       if (mounted) {
-        // Можна або викликати _fetchNotifications(),
-        // або просто додати нову нотифікацію в список:
         _handleNewNotification(data);
+      }
+    });
+
+    // 🚀 ДОДАЄМО СЛУХАЧ ОНЛАЙН-СТАТУСУ ДЛЯ КАРТОК У СТРІЦІ:
+    ChatManager().socket?.on('user_status_changed', (data) {
+      if (!mounted) return;
+      final userId = (data['user_id'] ?? data['id'])?.toString();
+      final bool isOnline = data['is_online'] == true;
+
+      if (userId != null) {
+        setState(() {
+          // Шукаємо гравця у завантаженому списку _loadedGamers і оновлюємо йому статус
+          for (var gamer in _loadedGamers) {
+            if (gamer.id.toString() == userId) {
+              // Оскільки GamerProfile immutable (final), створюємо оновлений об'єкт або оновлюємо напряму,
+              // якщо зробимо поле не final. Найпростіше оновити список:
+
+              // Перестворюємо профіль з новим статусом онлайн
+              int index = _loadedGamers.indexOf(gamer);
+              if (index != -1) {
+                _loadedGamers[index] = GamerProfile(
+                  id: gamer.id,
+                  nickname: gamer.nickname,
+                  email: gamer.email,
+                  avatar: gamer.avatar,
+                  isPro: gamer.isPro,
+                  mainGame: gamer.mainGame,
+                  platform: gamer.platform,
+                  chatType: gamer.chatType,
+                  tags: gamer.tags,
+                  languages: gamer.languages,
+                  hasVoice: gamer.hasVoice,
+                  isOnline: isOnline, // <--- Змінений статус
+                  gamesWithDetails: gamer.gamesWithDetails,
+                  gamesList: gamer.gamesList,
+                  platformsList: gamer.platformsList,
+                  connectedPlatforms: gamer.connectedPlatforms,
+                  times: gamer.times,
+                  rating: gamer.rating,
+                  password: gamer.password,
+                  timezoneOffset: gamer.timezoneOffset,
+                  lastSeen: data['last_seen']?.toString() ?? gamer.lastSeen,
+                );
+              }
+            }
+          }
+        });
       }
     });
   }
@@ -403,6 +452,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
       // 1. Формуємо базовий URL
       String url = '${ApiConfig.baseUrl}/find-matches?current_user_id=$userId';
+
+      // Якщо обрана конкретна гра через фільтр, передаємо її ID на бекенд
+      if (_selectedGameId != null) {
+        url += '&selected_game_id=$_selectedGameId';
+      }
 
       // 2. Якщо бекенд не вміє парсити "4,2", відправте ID по одному:
       // ?excluded_ids=4&excluded_ids=2
@@ -476,15 +530,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
   @override
   void dispose() {
-    _syncService.stopSync(); // ВАЖЛИВО: зупиняємо таймер, коли екран закривається
+    _syncService.stopSync();
     _searchController.dispose();
+    ChatManager().socket?.off('user_status_changed'); // <--- Відписка
     super.dispose();
   }
 
   void _resetFilters() {
     setState(() {
       _searchController.clear();
-      _confirmedActiveGames.clear();
+      //_confirmedActiveGames.clear();
       _temporarilySelectedGames.clear();
       _selectedPlayStyles.clear();
       _selectedPlatforms.clear();
@@ -1093,9 +1148,28 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
                         : () {
                       setState(() {
                         _confirmedActiveGames = List.from(_temporarilySelectedGames);
+
+                        // 🆕 Знаходимо ID першої обраної гри з мого профілю для передачі на бекенд
+                        if (_confirmedActiveGames.isNotEmpty) {
+                          final matchingGame = _myAvailableGames.firstWhere(
+                                (g) => g['name'] == _confirmedActiveGames.first,
+                            orElse: () => {},
+                          );
+                          // Якщо у тебе в _myAvailableGames зберігається ще й ID (або якщо його треба дістати з UserSession.currentUser),
+                          // зв'яжи його тут. Наприклад, через UserSession.currentUser?.gamesWithDetails:
+                          final fullGameObj = UserSession().currentUser?.gamesWithDetails.firstWhere(
+                                (g) => g['name'] == _confirmedActiveGames.first,
+                            orElse: () => {},
+                          );
+                          // Припустимо, у тебе є доступ до ID гри. Якщо у мапі тільки name/image,
+                          // краще зберігати в _myAvailableGames ще й id.
+                        }
+
                         _isGameDropdownOpen = false;
                         _searchController.clear();
+                        AppState.shownIds.clear(); // Скидаємо історію показаних при новому виборі гри
                       });
+                      _loadGamers(); // Завантажуємо нові картки під конкретну гру з бази!
                     },
                     child: Container(
                       width: 75,
