@@ -33,6 +33,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   void initState() {
     super.initState();
 
+    // 🔔 Підписуємося на оновлення непрочитаних через слухач
+    ChatManager().addUnreadListener(_handleUnreadChanged);
+
     _initChatManager();
 
     _screens = [
@@ -47,14 +50,27 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     };
   }
 
+  void _handleUnreadChanged() {
+    if (mounted) {
+      setState(() {
+        debugPrint("🔔 [NAV_BAR] Отримано сигнал про нові повідомлення! unreadCount = ${ChatManager().unreadCount}");
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    // Обов'язково відписуємось при знищенні екрана
+    ChatManager().removeUnreadListener(_handleUnreadChanged);
+    super.dispose();
+  }
+
   Future<void> _initChatManager() async {
     final userId = await UserSession.getUserId();
     if (userId != null) {
       ChatManager().init(userId.toString());
-      ChatManager().onUnreadChanged = () {
-        if (mounted) setState(() {});
-      };
-
+      // Видаляємо стару синтаксичну конструкцію ChatManager().onUnreadChanged,
+      // оскільки тепер використовуємо addUnreadListener вище.
       _fetchInitialUnreadCount();
     }
   }
@@ -102,18 +118,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
 
-  @override
-  @override
   Widget build(BuildContext context) {
     debugPrint("BUILD: unreadCount = ${ChatManager().unreadCount}");
 
-    // 🚀 Обережно загортаємо в PopScope для керування кнопкою "Назад"
+    // 🚀 Надійне керування кнопкою "Назад" через стабільний onPopInvoked
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (bool didPop, Object? result) async {
+      onPopInvoked: (bool didPop) async {
         if (didPop) return;
 
-        // Якщо ми не на першій вкладці (0 — стрічка), то спочатку перекидаємо на головну вкладку
+        // 1. Якщо ми не на стрічці (вкладка 0), спочатку повертаємось на стрічку
         if (_selectedIndex != 0) {
           setState(() {
             _selectedIndex = 0;
@@ -121,14 +135,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           return;
         }
 
-        // Якщо ми вже на головній вкладці — акуратно згортаємо додаток у фон
+        // 2. Якщо ми вже на стрічці — м'яко згортаємо додаток у фоновий режим
         await SystemNavigator.pop();
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         backgroundColor: const Color(0xFF0F0F13),
 
-        // IndexedStack зберігає стан екранів, але ми їх "смикаємо" через refreshData
+        // IndexedStack зберігає стан екранів
         body: IndexedStack(
           index: _selectedIndex,
           children: _screens,
@@ -136,7 +150,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
         bottomNavigationBar: NeonBottomNavigator(
           selectedIndex: _selectedIndex,
-          onTap: _onItemTapped, // Використовуємо наш оновлений метод
+          onTap: _onItemTapped,
           hasUnreadMessage: ChatManager().unreadCount > 0,
           hasUnreadRequests: ChatManager().friendRequestsCount > 0,
         ),

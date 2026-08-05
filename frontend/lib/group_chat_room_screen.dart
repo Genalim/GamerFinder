@@ -15,6 +15,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'chat_forward_screen.dart';
+import 'dart:async';
 // Зверни увагу: нам потрібен ChatMessageWidget, ChatMessage, MessageStatus і getCleanContent
 // Якщо вони лежать в chat_room_screen.dart, краще винести їх в окремий файл (наприклад, chat_components.dart)
 // Або тимчасово імпортувати з chat_room_screen.dart, якщо Dart дозволить без конфліктів.
@@ -84,6 +85,8 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
   Map<String, dynamic>? _groupData;
   Map<String, dynamic>? _pinnedMessage;
 
+  Timer? _uiRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -120,13 +123,17 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
     _loadHistory(widget.chatId, unreadCount: widget.unreadCount);
 
     // --- Підписки на сокети ---
-    ChatManager().socket?.off('new_message');
-    ChatManager().socket?.on('new_message', _addNewMessageToUi);
+    ChatManager().onMessageReceivedInChat = (data) {
+      if (mounted) {
+        _addNewMessageToUi(data);
+      }
+    };
 
-    ChatManager().socket?.off('messages_read');
-    ChatManager().socket?.on('messages_read', (data) {
-      if (data['chat_id'] == widget.chatId) _markMessagesAsReadUi(data);
-    });
+    ChatManager().onMessagesReadInChat = (data) {
+      if (data['chat_id'] == widget.chatId) {
+        _markMessagesAsReadUi(data);
+      }
+    };
 
     ChatManager().socket?.on('user_typing', (data) {
       if (data['chat_id'] == widget.chatId) {
@@ -235,16 +242,38 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
       final isEmpty = _textController.text.trim().isEmpty;
       if (_isInputEmpty != isEmpty) setState(() => _isInputEmpty = isEmpty);
     });
+
+    // 🔄 Додаємо локальний таймер оновлення інтерфейсу кожну хвилину, щоб статуси "offline X minutes" перемальовувались
+    _uiRefreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+
   }
 
   @override
   void dispose() {
-    ChatManager().removeStatusListener(_statusListener); // <--- Обов'язково відписуємось
+    _uiRefreshTimer?.cancel();
+
+    // 🛡️ Очищаємо колбеки сокета
+    ChatManager().onMessageReceivedInChat = null;
+    ChatManager().onMessagesReadInChat = null; // <-- ДОДАТИ ЦЕЙ РЯДОК
+
+    ChatManager().removeStatusListener(_statusListener);
+
+    ChatManager().socket?.off('user_typing');
+    ChatManager().socket?.off('message_edited');
+    ChatManager().socket?.off('message_deleted');
+    ChatManager().socket?.off('reaction_updated');
+    ChatManager().socket?.off('error');
+
     _textController.dispose();
     _focusNode.dispose();
-    WidgetsBinding.instance.removeObserver(this);
+    WidgetsBinding.instance.addObserver(this);
     super.dispose();
   }
+
 
   @override
   void didChangeMetrics() {
@@ -275,14 +304,31 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
         headers: await ApiService.getHeaders(),
       );
       if (response.statusCode == 200) {
-        final data = json.decode(response.body); // Зберігаємо в змінну
+        final data = json.decode(response.body);
+
+        final myId = UserSession().currentUser?.id.toString() ?? "";
+
+        // 🛡️ ЗАХИСТ ВІД ЗАТИРАННЯ БАЗОЮ:
+        // Якщо учасник у списку — це ми самі, одразу ставити йому is_online = true,
+        // щоб не чекати поки сокет пришле подію повторно.
+        if (data['members'] != null) {
+          for (var member in data['members']) {
+            final memberId = (member['id'] ?? member['user_id'])?.toString();
+            if (memberId == myId) {
+              member['is_online'] = true;
+            }
+          }
+        }
+
         setState(() {
           _groupData = data;
           _groupName = data['name'];
-          _pinnedMessage = data['pinned_message']; // <--- ДОДАЙ ЦЕЙ РЯДОК
+          _pinnedMessage = data['pinned_message'];
         });
       }
-    } catch (e) { debugPrint("Помилка завантаження інфо: $e"); }
+    } catch (e) {
+      debugPrint("Помилка завантаження інфо: $e");
+    }
   }
 
   // --- Методи роботи з файлами ---////
@@ -664,12 +710,11 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
         for (int i = 0; i < _messages.length; i++) {
           var msg = _messages[i];
-          // Якщо повідомлення від нас (або загалом перевіряємо не наші), але за логікою сокета воно прочитане співрозмовником
-          if (msg['sender_id'] != myId) {
-            bool shouldBeRead = (targetIndex != -1 && i <= targetIndex);
-            if (shouldBeRead && msg['status'] != 'read') {
-              msg['status'] = 'read';
-            }
+          bool shouldBeRead = (targetIndex != -1 && i <= targetIndex);
+
+          if (shouldBeRead && msg['status'] != 'read') {
+            // Оновлюємо статус як для чужих, так і для наших повідомлень, якщо їх прочитали
+            msg['status'] = 'read';
           }
         }
       }

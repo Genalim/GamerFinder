@@ -158,17 +158,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     final myId = UserSession().currentUser?.id.toString() ?? "";
     ChatManager().init(myId);
 
-    ChatManager().socket?.off('new_message');
-    ChatManager().socket?.on('new_message', (data) {
-      _addNewMessageToUi(data);
-    });
+    // 🚀 Прив'язуємо отримання повідомлень у відкритій кімнаті через ChatManager
+    ChatManager().onMessageReceivedInChat = (data) {
+      if (mounted) {
+        _addNewMessageToUi(data);
+      }
+    };
 
-    ChatManager().socket?.off('messages_read');
-    ChatManager().socket?.on('messages_read', (data) {
+    ChatManager().onMessagesReadInChat = (data) {
       if (data['chat_id'] == _activeChatId) {
         _markMessagesAsReadUi(data);
       }
-    });
+    };
 
     ChatManager().socket?.on('user_typing', (data) {
       if (data['chat_id'] == _activeChatId) {
@@ -606,10 +607,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
   void dispose() {
     print("🚨 [LIFECYCLE_DETECTOR] Викликано dispose для ChatRoomScreen!");
 
-    // 🛡️ Обов'язково знімаємо слухач статусів та всі сокет-події екрану
+    // 🛡️ Очищаємо колбеки
+    ChatManager().onMessageReceivedInChat = null;
+    ChatManager().onMessagesReadInChat = null; // <--- Очищаємо тут
+
     ChatManager().removeStatusListener(_statusListener);
-    ChatManager().socket?.off('new_message');
-    ChatManager().socket?.off('messages_read');
+
+    // ПРИБИРАЄМО socket?.off для messages_read, щоб не ламати глобальний менеджер!
     ChatManager().socket?.off('user_typing');
     ChatManager().socket?.off('message_edited');
     ChatManager().socket?.off('message_deleted');

@@ -411,15 +411,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.logout, color: Colors.white),
             title: const Text('Log out', style: TextStyle(color: Colors.white)),
             onTap: () async {
+              try {
+                final token = await UserSession.getToken();
+                if (token != null) {
+                  await http.post(
+                    Uri.parse('${ApiConfig.baseUrl}/users/logout'),
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": "Bearer $token",
+                    },
+                  );
+                }
+              } catch (e) {
+                debugPrint("Logout request error: $e");
+              }
+
               await UserSession.logout();
 
               // ДОДАЄМО СКИДАННЯ МЕНЕДЖЕРА РЕЄСТРАЦІЇ
               ProfileSetupManager.instance.reset();
 
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const SignInScreen()),
-                    (route) => false,
-              );
+              if (mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const SignInScreen()),
+                      (route) => false,
+                );
+              }
             },
           ),
           const SizedBox(height: 12),

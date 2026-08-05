@@ -357,6 +357,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
   final SyncService _syncService = SyncService();
 
+  Timer? _feedRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -385,48 +387,48 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
       if (!mounted) return;
       final userId = (data['user_id'] ?? data['id'])?.toString();
       final bool isOnline = data['is_online'] == true;
+      final String? lastSeen = data['last_seen']?.toString();
 
       if (userId != null) {
         setState(() {
-          // Шукаємо гравця у завантаженому списку _loadedGamers і оновлюємо йому статус
-          for (var gamer in _loadedGamers) {
-            if (gamer.id.toString() == userId) {
-              // Оскільки GamerProfile immutable (final), створюємо оновлений об'єкт або оновлюємо напряму,
-              // якщо зробимо поле не final. Найпростіше оновити список:
-
-              // Перестворюємо профіль з новим статусом онлайн
-              int index = _loadedGamers.indexOf(gamer);
-              if (index != -1) {
-                _loadedGamers[index] = GamerProfile(
-                  id: gamer.id,
-                  nickname: gamer.nickname,
-                  email: gamer.email,
-                  avatar: gamer.avatar,
-                  isPro: gamer.isPro,
-                  mainGame: gamer.mainGame,
-                  platform: gamer.platform,
-                  chatType: gamer.chatType,
-                  tags: gamer.tags,
-                  languages: gamer.languages,
-                  hasVoice: gamer.hasVoice,
-                  isOnline: isOnline, // <--- Змінений статус
-                  gamesWithDetails: gamer.gamesWithDetails,
-                  gamesList: gamer.gamesList,
-                  platformsList: gamer.platformsList,
-                  connectedPlatforms: gamer.connectedPlatforms,
-                  times: gamer.times,
-                  rating: gamer.rating,
-                  password: gamer.password,
-                  timezoneOffset: gamer.timezoneOffset,
-                  lastSeen: data['last_seen']?.toString() ?? gamer.lastSeen,
-                );
-              }
+          for (int i = 0; i < _loadedGamers.length; i++) {
+            if (_loadedGamers[i].id.toString() == userId) {
+              final gamer = _loadedGamers[i];
+              _loadedGamers[i] = GamerProfile(
+                id: gamer.id,
+                nickname: gamer.nickname,
+                email: gamer.email,
+                avatar: gamer.avatar,
+                isPro: gamer.isPro,
+                mainGame: gamer.mainGame,
+                platform: gamer.platform,
+                chatType: gamer.chatType,
+                tags: gamer.tags,
+                languages: gamer.languages,
+                hasVoice: gamer.hasVoice,
+                isOnline: isOnline, // ✅ Оновлюємо статус
+                gamesWithDetails: gamer.gamesWithDetails,
+                gamesList: gamer.gamesList,
+                platformsList: gamer.platformsList,
+                connectedPlatforms: gamer.connectedPlatforms,
+                times: gamer.times,
+                rating: gamer.rating,
+                password: gamer.password,
+                timezoneOffset: gamer.timezoneOffset,
+                lastSeen: lastSeen ?? gamer.lastSeen,
+              );
             }
           }
         });
       }
     });
+    _feedRefreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
+
 
   void _handleNewNotification(dynamic data) {
     final newNotif = NotificationModel.fromJson(data);
@@ -530,9 +532,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
   @override
   void dispose() {
+    _feedRefreshTimer?.cancel(); // Обов'язково закриваємо таймер
     _syncService.stopSync();
     _searchController.dispose();
-    ChatManager().socket?.off('user_status_changed'); // <--- Відписка
+    ChatManager().socket?.off('user_status_changed');
     super.dispose();
   }
 

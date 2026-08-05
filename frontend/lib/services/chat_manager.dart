@@ -18,6 +18,25 @@ class ChatManager {
   int get friendRequestsCount => _friendRequestsCount;
   VoidCallback? onFriendRequestsChanged;
 
+  // 🔔 Список слухачів для оновлення непрочитаних повідомлень
+  final List<VoidCallback> _unreadListeners = [];
+
+  void addUnreadListener(VoidCallback listener) {
+    if (!_unreadListeners.contains(listener)) {
+      _unreadListeners.add(listener);
+    }
+  }
+
+  void removeUnreadListener(VoidCallback listener) {
+    _unreadListeners.remove(listener);
+  }
+
+  void _notifyUnreadChanged() {
+    for (var listener in _unreadListeners) {
+      listener();
+    }
+  }
+
   final List<Function(String userId, bool isOnline)> _statusListeners = [];
 
   void addStatusListener(Function(String userId, bool isOnline) listener) {
@@ -41,6 +60,9 @@ class ChatManager {
 
   VoidCallback? onNewMessageReceived;
   VoidCallback? onChatListNeedsRefresh;
+
+  Function(Map<String, dynamic>)? onMessageReceivedInChat;
+  Function(Map<String, dynamic>)? onMessagesReadInChat;
 
   void init(String userId) {
     if (_socket != null) return;
@@ -91,14 +113,20 @@ class ChatManager {
         });
         // 🚀 1. Збільшуємо лічильник непрочитаних для нижнього бейджа
         _unreadCount++;
-        if (onUnreadChanged != null) {
-          onUnreadChanged!();
-        }
+        _notifyUnreadChanged();
 
         // 🚀 2. Оновлюємо і список чатів, і UI
         onNewMessageReceived?.call();
         onChatListNeedsRefresh?.call();
       }
+
+      // 🎯 ГОЛОВНЕ: Завжди передаємо повідомлення у відкриту кімнату чату,
+      // щоб відкритий чат миттєво додав його на екран
+      onMessageReceivedInChat?.call(data);
+    });
+
+    _socket!.on('messages_read', (data) {
+      onMessagesReadInChat?.call(data);
     });
 
     _socket!.on('new_notification', (data) {
@@ -153,13 +181,9 @@ class ChatManager {
     });
   }
 
-  Function()? onUnreadChanged;
-
   void setUnreadCount(int count) {
     _unreadCount = count;
-    if (onUnreadChanged != null) {
-      onUnreadChanged!();
-    }
+    _notifyUnreadChanged();
   }
 
   void setFriendRequestsCount(int count) {

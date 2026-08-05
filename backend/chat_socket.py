@@ -100,7 +100,13 @@ async def send_message(sid, data):
 
         await db.commit()
 
-    # Емітимо повідомлення всім у кімнаті
+        # 🔍 Збираємо актуальні unread_count для кожного учасника з бази
+        members_res = await db.execute(
+            select(ChatMember.user_id, ChatMember.unread_count).where(ChatMember.chat_id == chat_id)
+        )
+        member_counts = {row[0]: row[1] for row in members_res.all()}
+
+    # 1. Емітимо стандартну подію в кімнату чату (для самого екрана чату)
     await sio.emit('new_message', {
         'id': str(new_msg.id),
         'chat_id': chat_id,
@@ -111,6 +117,18 @@ async def send_message(sid, data):
         'status': "sent",
         'created_at': new_msg.created_at.isoformat()
     }, room=chat_id)
+
+    # 2. 🚀 Емітимо персональний сигнал для кожного одержувача в його особисту кімнату, щоб навігаційна панель запалила цифру
+    for uid, u_count in member_counts.items():
+        if uid != sender_id:
+            await sio.emit('new_message', {
+                'id': str(new_msg.id),
+                'chat_id': chat_id,
+                'sender_id': sender_id,
+                'sender_nickname': sender_nickname,
+                'content': content,
+                'unread_count': u_count  # <--- Тепер тут летить реальна цифра замість нуля
+            }, room=str(uid))
 
 #Typing indication for Chat.
 @sio.on('typing')

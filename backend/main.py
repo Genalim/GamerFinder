@@ -1283,10 +1283,20 @@ async def accept_notification(
     await db.commit()
 
     # 6. Емітимо подію через сокет, щоб чат відкрився і повідомлення з'явилося
+    unread_res = await db.execute(
+        select(ChatMember.unread_count).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == notif.recipient_id
+        )
+    )
+    recipient_unread = unread_res.scalar() or 1
+
+    # 6. Емітимо подію через сокет із правильним unread_count
     await sio.emit('new_message', {
         'chat_id': str(chat_id),
         'content': auto_msg.content,
-        'sender_id': notif.sender_id
+        'sender_id': notif.sender_id,
+        'unread_count': recipient_unread
     }, room=str(chat_id))
 
     return {"status": "accepted", "chat_id": str(chat_id)}
@@ -2078,11 +2088,20 @@ async def forward_message(
             .values(unread_count=ChatMember.unread_count + 1)
         )
         # ================================================================
+        unread_res = await db.execute(
+            select(func.max(ChatMember.unread_count)).where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.user_id != current_user_id
+            )
+        )
+        current_unread = unread_res.scalar() or 1
+
         await sio.emit('new_message', {
             'chat_id': str(chat_id),
             'content': new_msg.content,
             'sender_id': current_user_id,
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': datetime.utcnow().isoformat(),
+            'unread_count': current_unread
         }, room=str(chat_id))
 
     await db.commit()
@@ -2214,6 +2233,11 @@ async def get_chat_info(
     res = await db.execute(stmt)
     members = res.all()
 
+    def check_online(user):
+        if not user or not user.last_seen:
+            return False
+        return (datetime.utcnow() - user.last_seen) < timedelta(minutes=2)
+
     members_data = []
     is_me_admin = False
     for user, is_admin in members:
@@ -2221,8 +2245,9 @@ async def get_chat_info(
         members_data.append({
             "id": user.id,
             "nickname": user.nickname,
-            "is_admin": is_admin, # Тепер беремо з бази
-            "avatar": user.avatar
+            "is_admin": is_admin,
+            "avatar": user.avatar,
+            "is_online": check_online(user)  # 🔥 Додаємо поле, яке чесно каже, чи юзер онлайн
         })
 
     return {
@@ -2587,6 +2612,26 @@ async def user_ping(
         })
 
     return {"status": "ok"}
+
+@app.post("/users/logout")
+async def logout_user(
+        db: AsyncSession = Depends(get_db),
+        current_user_id: int = Depends(get_current_user_id)
+):
+    user = await db.get(User, current_user_id)
+    if user:
+        user.is_online = False
+        user.last_seen = datetime.utcnow()
+        await db.commit()
+
+        # 🚀 Миттєво сповіщаємо всіх через сокет, що юзер вийшов
+        await sio.emit('user_status_changed', {
+            "user_id": current_user_id,
+            "is_online": False,
+            "last_seen": user.last_seen.isoformat()
+        })
+
+    return {"status": "success", "message": "Logged out successfully"}
 
 app = socketio.ASGIApp(sio, app)
 if __name__ == "__main__":

@@ -158,24 +158,19 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
     // 1. Реєструємо функцію для примусового оновлення
     ChatListWidget.onRefreshRequested = _fetchChats;
 
-    // 🚀 2. Прив'язуємо оновлення списку чатів до ChatManager
+    // 🚀 2. Прив'язуємо оновлення списку чатів до колбеків ChatManager
     ChatManager().onNewMessageReceived = () {
       if (mounted) {
-        debugPrint("DEBUG: ChatManager сповістив про нове повідомлення, оновлюємо список чатів!");
+        debugPrint("DEBUG: ⚡ Оновлюємо список чатів через onNewMessageReceived!");
         _fetchChats();
       }
     };
 
     ChatManager().onChatListNeedsRefresh = () {
       if (mounted) {
-        _fetchChats(); // Метод, який перезавантажує список чатів з бекенду
+        _fetchChats();
       }
     };
-
-    ChatManager().socket?.on('new_message', (data) {
-      debugPrint("DEBUG: Прийшло нове повідомлення!");
-      _fetchChats();
-    });
   }
 
   List<ChatItem> _chats = []; // Спочатку порожній
@@ -185,9 +180,9 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
     // 3. Очищаємо "гачок" для оновлення
     ChatListWidget.onRefreshRequested = null;
 
-    // 4. Очищаємо підписки на сокети
-    ChatManager().socket?.off('new_chat_created');
+    // 4. Очищаємо колбеки менеджера
     ChatManager().onNewMessageReceived = null;
+    ChatManager().onChatListNeedsRefresh = null;
 
     routeObserver.unsubscribe(this);
     super.dispose();
@@ -232,9 +227,6 @@ class _ChatListWidgetState extends State<ChatListWidget> with RouteAware {
         // РАХУЄМО СУМУ НЕПРОЧИТАНИХ
         int totalUnread = newChats.fold(0, (sum, item) => sum + item.unreadCount);
         ChatManager().setUnreadCount(totalUnread);
-        if (ChatManager().onUnreadChanged != null) {
-          ChatManager().onUnreadChanged!();
-        }
 
         if (mounted) {
           setState(() {
