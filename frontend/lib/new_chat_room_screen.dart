@@ -149,6 +149,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
           print("🔄 [REALTIME_STATUS] Статус друга ${widget.friendName} змінено на: $isOnline");
           if (!isOnline) {
             _friendLastSeen = DateTime.now().toUtc().toIso8601String();
+          } else {
+            // 🚀 ЩОЙНО ДРУГ СТАВ ОНЛАЙН — синхронізуємо повідомлення та їх статуси (на випадок якщо він прочитав їх оффлайн)
+            if (_activeChatId != null) {
+              _loadHistory(_activeChatId!, isLoadNewer: true);
+            }
           }
         });
       }
@@ -308,6 +313,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
         );
       }
     });
+
+    // 🚀 СЛУХАЄМО РЕКОНЕКТ СОКЕТА В ЕКРАНІ ЧАТУ
+    ChatManager().onReconnected = () {
+      if (!mounted || _activeChatId == null) return;
+      debugPrint("🔄 [CHAT_ROOM] Сокет ожив! Синхронізуємо пропущені повідомлення...");
+
+      // 🚀 Примусово просимо завантажити новіші повідомлення відносно останнього у списку
+      if (_messages.isNotEmpty) {
+        _loadHistory(_activeChatId!, isLoadNewer: true);
+      } else {
+        // Якщо раптом список чомусь був порожнім — робимо повне перезавантаження історії
+        _loadHistory(_activeChatId!);
+      }
+    };
   }
 
   Future<void> _fetchFreshUnreadCount() async {
@@ -619,6 +638,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with WidgetsBindingObse
     ChatManager().socket?.off('message_deleted');
     ChatManager().socket?.off('reaction_updated');
     ChatManager().socket?.off('error');
+    ChatManager().onReconnected = null;
 
     _textController.dispose();
     _focusNode.dispose();

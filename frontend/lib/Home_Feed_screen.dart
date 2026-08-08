@@ -271,6 +271,7 @@ class MatchProfile {
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
 
+  static VoidCallback? onRefreshRequested;
 
   @override
   State<HomeFeedScreen> createState() => _HomeFeedScreenState();
@@ -370,12 +371,21 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
       _loadGamers();
     }
 
-    _fetchNotifications();
+    // 1. Синхронізація (фоновий синк)
     _syncService.startSync(() {
-      if (mounted) _fetchNotifications();
+      if (mounted) _fetchNotifications(); // ✅ Виправляємо на правильну назву
     });
 
+    // 2. ПРИВ'ЯЗУЄМО КОЛБЕК ВІД ЧАТ МЕНЕДЖЕРА ДО НАШОГО МЕТОДУ
+    ChatManager().onNewNotificationReceived = (data) {
+      debugPrint("DEBUG: Прийшла нова нотифікація через ChatManager: $data");
+      if (mounted) {
+        _handleNewNotification(data);
+      }
+    };
+
     ChatManager().socket?.on('new_notification', (data) {
+      debugPrint("DEBUG SOCKET: Статус з'єднання на момент нотифікації: ${ChatManager().socket?.connected}");
       debugPrint("DEBUG: Прийшла нова нотифікація через сокет: $data");
       if (mounted) {
         _handleNewNotification(data);
@@ -427,20 +437,32 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
         setState(() {});
       }
     });
+
+    HomeFeedScreen.onRefreshRequested = () {
+      if (mounted) {
+        _refreshMyProfileOnly();
+      }
+    };
   }
 
 
   void _handleNewNotification(dynamic data) {
     final newNotif = NotificationModel.fromJson(data);
 
-    // Перевіряємо, чи немає вже нотифікації з таким ID
+    // Перевіряємо, чи немає вже нотифікації з таким ID, щоб не було дублів
     bool exists = _notifications.any((n) => n.id == newNotif.id);
 
     if (!exists) {
       setState(() {
+        // Додаємо на початок списку
         _notifications.insert(0, newNotif);
-        _hasUnreadNotifications = true;
+
+        // Якщо оверлей зараз закритий, запалюємо червону крапку на дзвіночку!
+        if (!_isNotificationsOpen) {
+          _hasUnreadNotifications = true;
+        }
       });
+      debugPrint("🔔 Нову нотифікацію успішно додано в список через сокет, червона крапка активована.");
     }
   }
 
@@ -611,6 +633,37 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
         ),
       ),
     );
+  }
+
+  Future<void> _refreshMyProfileOnly() async {
+    try {
+      final userId = await UserSession.getUserId();
+      if (userId == null) return;
+      final token = await UserSession.getToken();
+
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/users/$userId'),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          UserSession().currentUser = GamerProfile.fromJson(data);
+          // Оновлюємо лише список ігор для вашого дропдауна в шапці:
+          _myAvailableGames = (UserSession().currentUser?.gamesWithDetails ?? []).map((g) => {
+            'name': g['name'] ?? '',
+            'image': g['image'] ?? ''
+          }).toList();
+        });
+        debugPrint("✅ Профіль та ігри користувача успішно оновлено без скидання стрічки!");
+      }
+    } catch (e) {
+      debugPrint("Помилка оновлення профілю: $e");
+    }
   }
 
 
@@ -841,131 +894,140 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      child: Row(
-        children: [
-          Container(
-            width: 33,
-            height: 33,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF181826),
-              border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.5),
-                  blurRadius: 6,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-            // 2. Логіка відображення аватарки
-            child: ClipOval(
-              child: (currentUser != null && currentUser.avatar != null && currentUser.avatar!.isNotEmpty)
-                  ? Image.network(
-                currentUser.avatar!.startsWith('http')
-                    ? currentUser.avatar!
-                    : '${ApiConfig.baseUrl}${currentUser.avatar}',
-                fit: BoxFit.cover,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          bool isNarrow = constraints.maxWidth < 380;
+
+          return Row(
+            children: [
+              Container(
                 width: 33,
                 height: 33,
-                errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(currentUser.nickname),
-              )
-                  : _buildLetterAvatar(currentUser?.nickname ?? '?'),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF181826),
-                borderRadius: BorderRadius.circular(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF181826),
+                  border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accentColor.withValues(alpha: 0.5),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: (currentUser != null && currentUser.avatar != null && currentUser.avatar!.isNotEmpty)
+                      ? Image.network(
+                    currentUser.avatar!.startsWith('http')
+                        ? currentUser.avatar!
+                        : '${ApiConfig.baseUrl}${currentUser.avatar}',
+                    fit: BoxFit.cover,
+                    width: 33,
+                    height: 33,
+                    errorBuilder: (context, error, stackTrace) => _buildLetterAvatar(currentUser.nickname),
+                  )
+                      : _buildLetterAvatar(currentUser?.nickname ?? '?'),
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () {
-                        setState(() {
-                          _isGameDropdownOpen = true;
-                        });
-                      },
-                      child: TextField(
-                        controller: _searchController,
-                        onTap: () {
-                          setState(() {
-                            _isGameDropdownOpen = true;
-                          });
-                        },
-                        onChanged: (value) {
-                          setState(() {});
-                        },
-                        style: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Poppins'),
-                        decoration: InputDecoration(
-                          hintText: placeholderText,
-                          hintStyle: TextStyle(
-                            color: _confirmedActiveGames.isNotEmpty ? Colors.white : const Color(0xFF8E8EA9),
-                            fontSize: 14,
-                            fontFamily: 'Poppins',
-                            fontWeight: FontWeight.w400,
+              const SizedBox(width: 4),
+              Expanded(
+                child: Container(
+                  height: 36,
+                  padding: EdgeInsets.symmetric(horizontal: isNarrow ? 6 : 10), // 🚀 Трохи зменшуємо внутрішній відступ на вузьких екранах
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF181826),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: () {
+                            setState(() {
+                              _isGameDropdownOpen = true;
+                            });
+                          },
+                          child: TextField(
+                            controller: _searchController,
+                            onTap: () {
+                              setState(() {
+                                _isGameDropdownOpen = true;
+                              });
+                            },
+                            onChanged: (value) {
+                              setState(() {});
+                            },
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: isNarrow ? 11.5 : 14, // 🚀 Зменшуємо шрифт з 12 до 11.5, щоб "now" ідеально влізло
+                                fontFamily: 'Poppins'
+                            ),
+                            decoration: InputDecoration(
+                              hintText: placeholderText,
+                              hintStyle: TextStyle(
+                                color: _confirmedActiveGames.isNotEmpty ? Colors.white : const Color(0xFF8E8EA9),
+                                fontSize: isNarrow ? 11.5 : 14, // 🚀 Аналогічно для підказки
+                                fontFamily: 'Poppins',
+                                fontWeight: FontWeight.w400,
+                              ),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                            ),
                           ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                    ),
-                  ),
-                  if (showClearButton)
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _searchController.clear();
-                          _confirmedActiveGames.clear();
-                          _temporarilySelectedGames.clear();
-                        });
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.only(right: 6, left: 6),
-                        child: Icon(Icons.close, color: Color(0xFF8E8EA9), size: 18),
+                      if (showClearButton)
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _searchController.clear();
+                              _confirmedActiveGames.clear();
+                              _temporarilySelectedGames.clear();
+                            });
+                          },
+                          child: const Padding(
+                            padding: EdgeInsets.only(right: 4, left: 4),
+                            child: Icon(Icons.close, color: Color(0xFF8E8EA9), size: 18),
+                          ),
+                        ),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _isGameDropdownOpen = !_isGameDropdownOpen;
+                          });
+                        },
+                        child: RotatedBox(
+                          quarterTurns: _isGameDropdownOpen ? 1 : 0,
+                          child: Icon(
+                            Icons.play_arrow,
+                            color: _isGameDropdownOpen ? accentColor : Colors.white,
+                            size: 28,
+                          ),
+                        ),
                       ),
-                    ),
-                  GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _isGameDropdownOpen = !_isGameDropdownOpen;
-                      });
-                    },
-                    child: RotatedBox(
-                      quarterTurns: _isGameDropdownOpen ? 1 : 0,
-                      child: Icon(
-                        Icons.play_arrow,
-                        color: _isGameDropdownOpen ? accentColor : Colors.white,
-                        size: 28,
-                      ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          NeonNotificationBell(
-            hasUnread: _hasUnreadNotifications,
-            isOpen: _isNotificationsOpen,
-            onTap: () {
-              setState(() {
-                _isNotificationsOpen = !_isNotificationsOpen;
-                if (_isNotificationsOpen) {
-                  _hasUnreadNotifications = false;
-                }
-              });
-            },
-          ),
-        ],
+              const SizedBox(width: 4),
+              NeonNotificationBell(
+                hasUnread: _hasUnreadNotifications,
+                isOpen: _isNotificationsOpen,
+                onTap: () {
+                  setState(() {
+                    _isNotificationsOpen = !_isNotificationsOpen;
+                    if (_isNotificationsOpen) {
+                      _hasUnreadNotifications = false;
+                    }
+                  });
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1213,6 +1275,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
   Widget _buildPlayStyleFilter() {
     final List<String> styles = ['Casual', 'Competitive', 'Co-op', 'Training'];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
@@ -1239,6 +1302,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
 
   Widget _buildPlatformFilter() {
     final List<String> platforms = ['PS', 'Mobile', 'PC', 'Xbox', 'Switch'];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
@@ -1263,23 +1327,35 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
     );
   }
 
-  Widget _buildFilterChip({required String label, required bool isSelected, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? const Color(0xFF0F0F1A) : Colors.white,
-            fontFamily: 'Inter',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
+  Widget _buildFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3.0), // Маленький рівний відступ між кнопками, щоб вони не злипалися
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 8), // Без горизонтального паддінгу, ширина розподілиться гнучко
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isSelected ? const Color(0xFF0F0F1A) : Colors.white,
+                fontFamily: 'Inter',
+                fontWeight: FontWeight.w600,
+                fontSize: 13, // Оптимальний розмір, який ідеально влазить у будь-який екран
+              ),
+            ),
           ),
         ),
       ),
@@ -1289,104 +1365,132 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> with AutomaticKeepAlive
   Widget _buildToggleAndRatingSection() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Якщо екран вузький (A50/A7), робимо шрифти трохи компактнішими для цього рядка
+          bool isNarrow = constraints.maxWidth < 380;
+
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Voice chat',
-                style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16, letterSpacing: -0.04),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () => setState(() => _voiceChatOn = !_voiceChatOn),
-                child: Container(
-                  width: 60,
-                  height: 25,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2B2B3B), // Статичний темний фон
-                    borderRadius: BorderRadius.circular(12),
+              // Ліва частина (Voice chat + тумблер)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Voice chat',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w500,
+                        fontSize: isNarrow ? 14 : 16,
+                        letterSpacing: -0.04
+                    ),
                   ),
-                  child: Stack(
-                    children: [
-                      // Текст ON/OFF (статичний, під бігунком)
-                      Positioned(
-                        left: _voiceChatOn ? 8 : 37,
-                        top: 8,
-                        child: Text(
-                          _voiceChatOn ? 'ON' : 'OFF',
-                          style: const TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF8E8EA9),
-                          ),
-                        ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => setState(() => _voiceChatOn = !_voiceChatOn),
+                    child: Container(
+                      width: 54,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2B2B3B),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      // Анімований бігунок-капсула
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeInOut,
-                        left: _voiceChatOn ? 27 : 2,
-                        top: 3,
-                        child: Container(
-                          width: 31,
-                          height: 19,
-                          decoration: BoxDecoration(
-                            color: _voiceChatOn ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
-                            borderRadius: BorderRadius.circular(10), // Робить форму капсули
-                            border: Border.all(
-                              color: const Color(0xFF00F5A0),
-                              width: 1,
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: _voiceChatOn ? 6 : 32,
+                            top: 7,
+                            child: Text(
+                              _voiceChatOn ? 'ON' : 'OFF',
+                              style: const TextStyle(
+                                fontFamily: 'Poppins',
+                                fontSize: 8,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF8E8EA9),
+                              ),
                             ),
+                          ),
+                          AnimatedPositioned(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeInOut,
+                            left: _voiceChatOn ? 25 : 2,
+                            top: 2,
+                            child: Container(
+                              width: 27,
+                              height: 20,
+                              decoration: BoxDecoration(
+                                color: _voiceChatOn ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFF00F5A0),
+                                  width: 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 8),
+              // Права частина (Rating + зірки або Unlock in PRO) із захистом від переповнення через Flexible
+              Flexible(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Rating',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w500,
+                          fontSize: isNarrow ? 14 : 16
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (UserSession().currentUser?.isPro ?? false) ...[
+                      ...List.generate(5, (index) {
+                        final starValue = (index + 1).toDouble();
+                        return GestureDetector(
+                          onTap: () => setState(() {
+                            _minRatingFilter = (_minRatingFilter == starValue) ? 0.0 : starValue;
+                          }),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                            child: FigmaRatingStar(
+                              size: isNarrow ? 14 : 16,
+                              isFilled: _minRatingFilter >= starValue,
+                            ),
+                          ),
+                        );
+                      }),
+                    ] else ...[
+                      const Icon(Icons.lock, color: Color(0xFF6F6F80), size: 14),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Unlock in PRO',
+                          overflow: TextOverflow.ellipsis, // 🚀 Захист від обрізання та вилазіння за межі
+                          style: TextStyle(
+                              color: const Color(0xFF8E8EA9),
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w500,
+                              fontSize: isNarrow ? 13 : 16
                           ),
                         ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
               ),
             ],
-          ),
-          //Rating Filter
-          Row(
-            children: [
-              const Text(
-                'Rating',
-                style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
-              ),
-              const SizedBox(width: 10),
-              // Якщо користувач PRO — показуємо ваші FigmaRatingStar, інакше — замок
-              if (UserSession().currentUser?.isPro ?? false) ...[
-                ...List.generate(5, (index) {
-                  final starValue = (index + 1).toDouble();
-                  return GestureDetector(
-                    onTap: () => setState(() {
-                      // Перемикач: вибір зірки або скидання фільтра
-                      _minRatingFilter = (_minRatingFilter == starValue) ? 0.0 : starValue;
-                    }),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: FigmaRatingStar(
-                        size: 16,
-                        // Зірка заповнена, якщо її значення <= обраному фільтру
-                        isFilled: _minRatingFilter >= starValue,
-                      ),
-                    ),
-                  );
-                }),
-              ] else ...[
-                const Icon(Icons.lock, color: Color(0xFF6F6F80), size: 16),
-                const SizedBox(width: 4),
-                const Text(
-                  'Unlock in PRO',
-                  style: TextStyle(color: Color(0xFF8E8EA9), fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 16),
-                ),
-              ],
-            ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -1805,7 +1909,7 @@ class SyncService {
 
   void startSync(Function onSync) {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 90), (timer) {
+    _timer = Timer.periodic(const Duration(seconds: 300), (timer) {
       onSync();
     });
   }

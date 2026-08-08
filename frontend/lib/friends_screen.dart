@@ -512,9 +512,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _buildFriendsTab() {
     if (_friendsList.isEmpty) {
       return const Center(
-        child: SizedBox(
-          width: 324,
-          height: 39,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
           child: Text(
             'You don’t have friends yet\n\nFind players and add them to play again later',
             textAlign: TextAlign.center,
@@ -523,7 +522,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
               fontFamily: 'Poppins',
               fontWeight: FontWeight.w500,
               fontSize: 14,
-              height: 13 / 14,
+              // Прибрали фіксований height, Flutter сам розрахує міжрядковий інтервал
             ),
           ),
         ),
@@ -545,9 +544,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _buildRequestsTab() {
     if (_requestsList.isEmpty) {
       return const Center(
-        child: SizedBox(
-          width: 110,
-          height: 13,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
           child: Text(
             'No requests yet',
             textAlign: TextAlign.center,
@@ -556,7 +554,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
               fontFamily: 'Poppins',
               fontWeight: FontWeight.w500,
               fontSize: 14,
-              height: 13 / 14,
             ),
           ),
         ),
@@ -578,9 +575,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _buildBlockedTab() {
     if (_blockedList.isEmpty) {
       return const Center(
-        child: SizedBox(
-          width: 150,
-          height: 13,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
           child: Text(
             'No blocked users',
             textAlign: TextAlign.center,
@@ -589,7 +585,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
               fontFamily: 'Poppins',
               fontWeight: FontWeight.w500,
               fontSize: 14,
-              height: 13 / 14,
             ),
           ),
         ),

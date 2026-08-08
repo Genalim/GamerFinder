@@ -2,13 +2,16 @@ import 'Welcome_screen.dart';
 import 'package:flutter/material.dart';
 import 'profile_setup_screen.dart';
 import 'package:flutter/services.dart';
+import 'services/sound_service.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
-
 
 void main() async {
   // Забезпечуємо ініціалізацію зв'язку з платформою перед викликом SystemChrome
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🚀 Ініціалізуємо аудіоконтекст для коректної роботи звуків на всіх пристроях
+  await SoundService.init();
 
   // Фіксуємо орієнтацію додатку суто у вертикальному положенні (Portrait)
   await SystemChrome.setPreferredOrientations([
@@ -32,7 +35,6 @@ class MyApp extends StatelessWidget {
         brightness: Brightness.dark,
         primarySwatch: Colors.green,
       ),
-      // Ось тут замінюємо старий RegistrationScreen на новий
       home: const WelcomeScreen(),
     );
   }

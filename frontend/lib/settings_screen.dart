@@ -16,6 +16,7 @@ import 'notification_history_screen.dart';
 import 'subscription_screen.dart';
 import 'services/settings_service.dart';
 import 'profile_setup_manager.dart';
+import 'services/chat_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -411,6 +412,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.logout, color: Colors.white),
             title: const Text('Log out', style: TextStyle(color: Colors.white)),
             onTap: () async {
+              // 🚀 1. ПЕРШИМ ДІЛОМ ВБИВАЄМО СОКЕТ І ТАЙМЕР ПІНГІВ У CHAT MANAGER!
+              ChatManager().dispose();
+              SyncService().stopSync();
+
               try {
                 final token = await UserSession.getToken();
                 if (token != null) {
@@ -428,7 +433,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               await UserSession.logout();
 
-              // ДОДАЄМО СКИДАННЯ МЕНЕДЖЕРА РЕЄСТРАЦІЇ
+              // Скидання менеджера реєстрації
               ProfileSetupManager.instance.reset();
 
               if (mounted) {

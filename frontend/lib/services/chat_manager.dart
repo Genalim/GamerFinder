@@ -18,6 +18,8 @@ class ChatManager {
   int get friendRequestsCount => _friendRequestsCount;
   VoidCallback? onFriendRequestsChanged;
 
+  Function(Map<String, dynamic>)? onNewNotificationReceived;
+
   // 🔔 Список слухачів для оновлення непрочитаних повідомлень
   final List<VoidCallback> _unreadListeners = [];
 
@@ -64,6 +66,9 @@ class ChatManager {
   Function(Map<String, dynamic>)? onMessageReceivedInChat;
   Function(Map<String, dynamic>)? onMessagesReadInChat;
 
+  VoidCallback? onReconnected;
+  bool _hasConnectedOnce = false;
+
   void init(String userId) {
     if (_socket != null) return;
 
@@ -85,10 +90,31 @@ class ChatManager {
       'reconnectionDelayMax': 5000,
     });
 
+    // 🔍 --- ДОДАЄМО ДЕБАГ З'ЄДНАННЯ ТУТ ---
+    if (_socket != null) {
+      debugPrint("DEBUG SOCKET Connected (initial): ${_socket!.connected}");
+
+      _socket!.onConnect((_) {
+        debugPrint("DEBUG SOCKET: Успішно підключено до сервера! ID сокета: ${_socket!.id}");
+      });
+
+      _socket!.onDisconnect((reason) {
+        debugPrint("DEBUG SOCKET: Втрачено з'єднання із сервером! Причина: $reason");
+      });
+    }
+    // ----------------------------------------
+
     _socket!.onConnect((_) {
       print('DEBUG: Сокет підключено!');
       isConnected = true;
       if (onStatusChanged != null) onStatusChanged!(true);
+
+      if (_hasConnectedOnce) {
+        debugPrint("🔄 [SOCKET_RECONNECT] Сокет успішно перепідключено. Викликаємо onReconnected...");
+        onReconnected?.call();
+      } else {
+        _hasConnectedOnce = true;
+      }
     });
 
     _socket!.onDisconnect((reason) {
@@ -162,6 +188,23 @@ class ChatManager {
         for (var listener in _statusListeners) {
           listener(changedUserId, isOnline);
         }
+      }
+    });
+
+    _socket!.on('new_notification', (data) {
+      print("🕵️ [SOUND_DETECTIVE] 🔔 Отримано подію 'new_notification'. Перевіряємо налаштування звуку...");
+
+      SettingsService.isMatchAlertsEnabled().then((isEnabled) {
+        if (isEnabled) {
+          SoundService.playNotification();
+        }
+      }).catchError((error) {
+        print("🕵️ [SOUND_DETECTIVE] 💥 ПОМИЛКА: $error");
+      });
+
+      // 🚀 ПЕРЕДАЄМО ДАНІ У ФРОНТЕНД (ОБРАНИЙ ЕКРАН)
+      if (data is Map<String, dynamic>) {
+        onNewNotificationReceived?.call(data);
       }
     });
 

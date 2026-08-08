@@ -111,6 +111,11 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
             if (memberId == userId) {
               member['is_online'] = isOnline;
               print("🔄 [GROUP_REALTIME_STATUS] Учасник $userId змінив статус на: $isOnline");
+
+              // 🚀 ЩОЙНО ХТОСЬ ІЗ УЧАСНИКІВ СТАВ ОНЛАЙН — синхронізуємо повідомлення та статуси прочитання
+              if (isOnline && widget.chatId != null && _messages.isNotEmpty) {
+                _loadHistory(widget.chatId, isLoadNewer: true);
+              }
               break;
             }
           }
@@ -250,6 +255,19 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
       }
     });
 
+    ChatManager().onReconnected = () {
+      if (!mounted || widget.chatId == null) return;
+      debugPrint("🔄 [CHAT_ROOM] Сокет ожив! Синхронізуємо пропущені повідомлення...");
+
+      // 🚀 Примусово просимо завантажити новіші повідомлення відносно останнього у списку
+      if (_messages.isNotEmpty) {
+        _loadHistory(widget.chatId!, isLoadNewer: true);
+      } else {
+        // Якщо раптом список чомусь був порожнім — робимо повне перезавантаження історії
+        _loadHistory(widget.chatId!);
+      }
+    };
+
   }
 
   @override
@@ -258,7 +276,8 @@ class _GroupChatRoomScreenState extends State<GroupChatRoomScreen> with WidgetsB
 
     // 🛡️ Очищаємо колбеки сокета
     ChatManager().onMessageReceivedInChat = null;
-    ChatManager().onMessagesReadInChat = null; // <-- ДОДАТИ ЦЕЙ РЯДОК
+    ChatManager().onMessagesReadInChat = null;
+    ChatManager().onReconnected = null;
 
     ChatManager().removeStatusListener(_statusListener);
 

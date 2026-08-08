@@ -1019,12 +1019,13 @@ async def send_invite(
             detail="Wait 10 minutes before sending another invite"
         )
 
-    # 2. Ліміт 3 інвайти на добу
+    # 2. Ліміт 3 інвайти на добу (тільки від мене до нього і тільки тип match)
     day_ago = datetime.utcnow() - timedelta(hours=24)
     count_query = select(func.count(Notification.id)).filter(
         Notification.sender_id == current_user_id,
         Notification.recipient_id == data.recipient_id,
-        Notification.created_at >= day_ago
+        Notification.created_at >= day_ago,
+        Notification.type == "match"
     )
     count_result = await db.execute(count_query)
     if (count_result.scalar() or 0) >= 3:
@@ -1226,7 +1227,7 @@ async def accept_notification(
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    # 2. Змінюємо статус та додаємо запит на рейтинг (як було в тебе)
+    # 2. Змінюємо статус та додаємо запит на рейтинг
     notif.state = "accepted"
     new_rating_req = RatingRequest(
         sender_id=notif.sender_id,
@@ -1238,7 +1239,6 @@ async def accept_notification(
     db.add(new_rating_req)
 
     # 3. Логіка отримання/створення чату
-    # Шукаємо існуючий приватний чат між цими двома
     stmt = text("""
         SELECT cm.chat_id 
         FROM chat_members cm
@@ -1251,7 +1251,6 @@ async def accept_notification(
     chat_id = res.scalar()
 
     if not chat_id:
-        # Створюємо новий чат, якщо немає
         new_chat = Chat(is_group=False)
         db.add(new_chat)
         await db.flush()
@@ -1269,7 +1268,6 @@ async def accept_notification(
     )
     db.add(auto_msg)
 
-    # === 🆕 ЗБІЛЬШУЄМО unread_count ДЛЯ ОТРИМУВАЧА АВТО-ПОВІДОМЛЕННЯ ===
     await db.execute(
         update(ChatMember)
         .where(
@@ -1279,10 +1277,21 @@ async def accept_notification(
         .values(unread_count=ChatMember.unread_count + 1)
     )
 
-    # 5. Фіксуємо все в БД одним махом
     await db.commit()
 
-    # 6. Емітимо подію через сокет, щоб чат відкрився і повідомлення з'явилося
+    # 🚀 ДОДАЄМО СОКЕТ-ПОВІДОМЛЕННЯ ДЛЯ ВІДПРАВНИКА ІНВАЙТУ (що його інвайт прийнято!)
+    await sio.emit('new_notification', {
+        "id": notif.id,
+        "user_nickname": "Teammate", # Можна підтягти нік отримувача за потреби
+        "message": notif.message,
+        "type": notif.type,
+        "state": "accepted",
+        "game": notif.game,
+        "sender_id": str(notif.recipient_id),
+        "time": datetime.utcnow().isoformat()
+    }, room=str(notif.sender_id))
+
+    # 5. Емітимо подію через сокет, щоб чат відкрився і повідомлення з'явилося
     unread_res = await db.execute(
         select(ChatMember.unread_count).where(
             ChatMember.chat_id == chat_id,
@@ -1291,7 +1300,6 @@ async def accept_notification(
     )
     recipient_unread = unread_res.scalar() or 1
 
-    # 6. Емітимо подію через сокет із правильним unread_count
     await sio.emit('new_message', {
         'chat_id': str(chat_id),
         'content': auto_msg.content,
@@ -1314,6 +1322,18 @@ async def update_notification_status(
 
     notif.state = new_status
     await db.commit()
+
+    # 🚀 МИТТЄВИЙ СОКЕТ ДЛЯ ВІДПРАВНИКА (щоб він побачив статус "declined" або новий стан)
+    await sio.emit('new_notification', {
+        "id": notif.id,
+        "message": notif.message,
+        "type": notif.type,
+        "state": notif.state,
+        "game": notif.game,
+        "sender_id": str(notif.recipient_id),
+        "time": datetime.utcnow().isoformat()
+    }, room=str(notif.sender_id))
+
     return {"status": "success"}
 
 @app.patch("/notifications/{id}/archive")

@@ -97,6 +97,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       _selectedIndex = index;
     });
 
+    // 🚀 Оновлення для Home Feed (Вкладка 0) — тільки ваш профіль та ігри
+    if (index == 0) {
+      HomeFeedScreen.onRefreshRequested?.call();
+      debugPrint("DEBUG: Оновлення профілю та ігор у HomeFeed без скидання стрічки!");
+    }
+
     // Оновлення для Друзів
     if (index == 1) {
       final state = _friendsKey.currentState;
@@ -118,6 +124,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
 
+  @override
   Widget build(BuildContext context) {
     debugPrint("BUILD: unreadCount = ${ChatManager().unreadCount}");
 
@@ -135,8 +142,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           return;
         }
 
-        // 2. Якщо ми вже на стрічці — м'яко згортаємо додаток у фоновий режим
-        await SystemNavigator.pop();
+        // 2. Якщо ми вже на стрічці — згортаємо додаток у фоновий режим
+        await SystemChannels.platform.invokeMethod('SystemNavigator.pop');
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
