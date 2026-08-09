@@ -134,16 +134,25 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       onPopInvoked: (bool didPop) async {
         if (didPop) return;
 
+        print("🕵️ [BACK_DETECTIVE] Натиснуто системну кнопку 'Назад'. Поточний індекс вкладки: $_selectedIndex");
+
         // 1. Якщо ми не на стрічці (вкладка 0), спочатку повертаємось на стрічку
         if (_selectedIndex != 0) {
+          print("🕵️ [BACK_DETECTIVE] Ми не на стрічці. Повертаємось на Home Feed (вкладка 0).");
           setState(() {
             _selectedIndex = 0;
           });
           return;
         }
 
-        // 2. Якщо ми вже на стрічці — згортаємо додаток у фоновий режим
-        await SystemChannels.platform.invokeMethod('SystemNavigator.pop');
+        // 2. Якщо ми вже на Home Feed — згортаємо додаток у бекграунд без вбивства процесу
+        print("🕵️ [BACK_DETECTIVE] Ми вже на Home Feed. Згортаємо додаток у бекграунд...");
+
+        try {
+          const MethodChannel('android/back/ground').invokeMethod('moveTaskToBack');
+        } catch (e) {
+          print("🕵️ [BACK_DETECTIVE] Бекграунд-канал недоступний: $e");
+        }
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
