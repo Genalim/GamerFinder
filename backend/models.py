@@ -26,8 +26,13 @@ class User(Base):
     pro_expiry_date = Column(DateTime, nullable=True)
     pro_trial_dismissed_at = Column(DateTime, nullable=True)
     rating = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
     is_verified = Column(Boolean, default=False)
+    verification_token = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+
+    reset_password_token = Column(String, nullable=True)
+    reset_password_expires = Column(DateTime, nullable=True)
 
     # 🚀 ДИНАМІЧНИЙ СТАТУС ОНЛАЙН
     @property
@@ -204,6 +209,9 @@ class MessageReaction(Base):
     reaction_type = Column(String, default='like')
     created_at = Column(DateTime, default=datetime.utcnow)
     message = relationship("Message", back_populates="reactions")
+
+
+
 
 
 

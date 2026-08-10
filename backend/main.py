@@ -16,7 +16,7 @@ from database import get_db, engine, Base
 from models import User, UserLanguages, UserPlatforms, UserAvailability, UserAccounts, UserGames, Game, UserStyles, Friendship, UserRating, Notification, RatingRequest, Chat, ChatMember, Message, MessageReaction, ChatHidden
 from auth import get_password_hash, verify_password, create_access_token, get_current_user_id
 
-from fastapi import File, UploadFile
+from fastapi import File, UploadFile, Form
 import shutil
 import os
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +26,9 @@ from fastapi.responses import JSONResponse
 from fastapi import Depends
 import uuid
 from pydantic import BaseModel
+
+import smtplib
+from email.message import EmailMessage
 
 from fastapi import APIRouter
 
@@ -70,6 +73,145 @@ async def update_expired_notifications(db: AsyncSession):
 
     await db.commit()
 
+def send_verification_email(to_email: str, token: str):
+    # Беремо хост і порт із docker-compose (за замовчуванням mailpit:1025)
+    smtp_host = os.getenv("SMTP_HOST", "localhost")
+    smtp_port = int(os.getenv("SMTP_PORT", "1025"))
+
+    # Посилання, куди юзер нібито клікає з листа (можеш направити на свій локальний апі)
+    verification_link = f"http://localhost:8000/auth/verify?token={token}"
+
+    msg = EmailMessage()
+    msg['Subject'] = "Verify your email"
+    msg['From'] = "noreply@gamebuddy.com"
+    msg['To'] = to_email
+
+    # Гарний HTML-шаблон у твойому стилі
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Verify your email</title>
+        <style>
+            body {{
+                background-color: #0F0F13;
+                margin: 0;
+                padding: 0;
+                font-family: 'Poppins', Arial, sans-serif;
+                color: #FFFFFF;
+            }}
+            .container {{
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 40px 20px;
+                background-color: #0F0F13;
+                text-align: center;
+            }}
+            .subject-text {{
+                font-weight: 500;
+                font-size: 16px;
+                line-height: 27px;
+                color: #FFFFFF;
+                margin-bottom: 30px;
+            }}
+            .logo-img {{
+                width: 130px;
+                height: auto;
+                margin-bottom: 25px;
+                filter: drop-shadow(0px 0px 6px rgba(0, 245, 160, 0.4));
+            }}
+            .text-content {{
+                text-align: center;
+                color: #FFFFFF;
+                font-size: 16px;
+                line-height: 27px;
+                padding: 0 10px;
+            }}
+            .btn-container {{
+                text-align: center;
+                margin: 35px 0;
+            }}
+            .verify-btn {{
+                display: inline-block;
+                font-weight: 700;
+                font-size: 20px;
+                line-height: 27px;
+                color: #00F5A0 !important;
+                text-decoration: none;
+                text-shadow: 0px 0px 4px rgba(0, 245, 160, 0.5);
+            }}
+            .footer-box {{
+                margin-top: 40px;
+                background: #181826;
+                border-radius: 12px;
+                padding: 20px;
+                font-size: 14px;
+                line-height: 27px;
+                color: #6F6F80;
+                text-align: center;
+            }}
+            .footer-box a {{
+                color: #6F6F80;
+                text-decoration: underline;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- Subject of the letter -->
+            <div class="subject-text">Subject of the letter: Verify your email</div>
+
+            <!-- Логотип-монстрик -->
+            <div>
+                <img src="http://192.168.0.229:8000/uploads/email/email_logo.png" alt="GAME BUDDY" class="logo-img">
+            </div>
+
+            <!-- Основний блок тексту (тепер без сірого фону та рамки, по центру) -->
+            <div class="text-content">
+                <p style="margin-top: 0;">Hi,</p>
+                <p>Thanks for joining <strong>GAME BUDDY</strong>.</p>
+                <p>Please confirm your email address to activate your account and start connecting with other players.</p>
+                
+                <!-- Кнопка Verify email -->
+                <div class="btn-container">
+                    <a href="http://192.168.0.229:8000/auth/verify?token={token}" class="verify-btn">Verify email</a>
+                </div>
+
+                <p style="margin-bottom: 0;">If you didn’t create this account, you can safely ignore this email.</p>
+                
+                <p style="margin-top: 30px; margin-bottom: 0;">
+                    Thanks for your time,<br>
+                    The GAME BUDDY Team <span style="color: #00F5A0; filter: drop-shadow(0px 0px 4px rgba(0, 245, 160, 0.5));">❤</span>
+                </p>
+            </div>
+
+            <!-- Футер залишається в акуратному блоці знизу -->
+            <div class="footer-box">
+                <p style="margin: 0;">
+                    <a href="http://192.168.0.229:8000/privacy">Privacy Policy</a> • 
+                    <a href="http://192.168.0.229:8000/support">Contact Support</a>
+                </p>
+                <p style="margin: 0;">© 2026 GAME BUDDY</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    msg.set_content("Please verify your email by clicking the link.")
+    msg.add_alternative(html_content, subtype='html')
+
+    try:
+        # Для Mailpit пароль і логін не потрібні, тому просто шлемо на порт 1025
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.send_message(msg)
+        print(f"✅ [MAILPIT] Лист успішно надіслано на {to_email}")
+    except Exception as e:
+        print(f"❌ [MAILPIT] Помилка відправки листа: {e}")
+
+
+
 # 1. СПОЧАТКУ функція lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -107,6 +249,9 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     # 1. Хешуємо пароль
     hashed_password = get_password_hash(user_data.password)
 
+    #Генеруємо токен на час реєстрації
+    verification_token = str(uuid.uuid4())
+
     # 2. Створюємо об'єкт користувача
     new_user = User(
         nickname=user_data.nickname,
@@ -116,7 +261,10 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
         timezone_offset=user_data.timezone_offset,
         voice_chat=user_data.voice_chat,
         is_online=user_data.is_online,
-        is_pro=user_data.is_pro
+        is_pro=user_data.is_pro,
+        is_verified=False,
+        verification_token=verification_token,
+        created_at=datetime.utcnow()
     )
     db.add(new_user)
 
@@ -183,7 +331,113 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     # Фіксуємо зміни в базі
     await db.commit()
 
+    # 🔥 3. ВІДПРАВЛЯЄМО ЛИСТ ОДРАЗУ ПІСЛЯ УСПІШНОЇ РЕЄСТРАЦІЇ
+    send_verification_email(new_user.email, verification_token)
+
     return {"status": "success", "user_id": new_user.id}
+
+@app.post("/auth/test-email")
+async def test_email_endpoint(data: dict):
+    email = data.get("email", "test@gamebuddy.com")
+    # Генеруємо фейковий токен для перевірки
+    fake_token = str(uuid.uuid4())
+
+    # Викликаємо нашу функцію відправки
+    send_verification_email(email, fake_token)
+
+    return {"status": "success", "message": f"Test email sent to {email}. Check Mailpit at http://localhost:8025"}
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    # Точний шлях до файлу згідно з твоїм скріншотом: uploads/email/privacy/privacy.html
+    file_path = "uploads/email/privacy/privacy.html"
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Privacy Policy page not found")
+
+@app.get("/auth/verify", response_class=HTMLResponse)
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    # 1. Шукаємо юзера за токеном
+    result = await db.execute(select(User).where(User.verification_token == token))
+    user = result.scalars().first()
+
+    if not user:
+        return """
+        <html><body style="background-color: #0F0F13; color: white; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Invalid or expired verification link.</h2>
+        </body></html>
+        """, 400
+
+    # 2. Перевіряємо, чи пройшло більше 24 годин
+    if user.created_at < datetime.utcnow() - timedelta(hours=24):
+        # Видаляємо прострочений мертвий акаунт зі всіма зв'язками
+        uid = user.id
+        await db.execute(delete(UserLanguages).where(UserLanguages.user_id == uid))
+        await db.execute(delete(UserPlatforms).where(UserPlatforms.user_id == uid))
+        await db.execute(delete(UserAvailability).where(UserAvailability.user_id == uid))
+        await db.execute(delete(UserGames).where(UserGames.user_id == uid))
+        await db.execute(delete(UserAccounts).where(UserAccounts.user_id == uid))
+        await db.execute(delete(UserStyles).where(UserStyles.user_id == uid))
+        await db.delete(user)
+        await db.commit()
+
+        return """
+        <html><body style="background-color: #0F0F13; color: #FF3B5C; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Verification link has expired (24h limit).</h2>
+            <p style="color: #A3A3B5;">This account has been removed. Please register again in the app.</p>
+        </body></html>
+        """
+
+    # 3. Якщо все ок — підтверджуємо пошту!
+    user.is_verified = True
+    user.verification_token = None # Очищаємо токен, щоб не використали повторно
+    await db.commit()
+
+    # Повертаємо красиву сторінку успіху у стилі твого додатку
+    return """
+    <html><body style="background-color: #0F0F13; color: white; text-align: center; padding-top: 50px; font-family: sans-serif;">
+        <h2 style="color: #00F5A0;">Email verified successfully!</h2>
+        <p style="color: #A3A3B5;">You can now return to the GAME BUDDY app and sign in.</p>
+    </body></html>
+    """
+
+
+@app.post("/auth/cancel-registration")
+async def cancel_registration(data: dict, db: AsyncSession = Depends(get_db)):
+    email = data.get("email")
+    if not email:
+        return {"status": "error"}
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+
+    # Видаляємо лише якщо акаунт досі НЕ верифікований
+    if user and not user.is_verified:
+        uid = user.id
+        await db.execute(delete(UserLanguages).where(UserLanguages.user_id == uid))
+        await db.execute(delete(UserPlatforms).where(UserPlatforms.user_id == uid))
+        await db.execute(delete(UserAvailability).where(UserAvailability.user_id == uid))
+        await db.execute(delete(UserGames).where(UserGames.user_id == uid))
+        await db.execute(delete(UserAccounts).where(UserAccounts.user_id == uid))
+        await db.execute(delete(UserStyles).where(UserStyles.user_id == uid))
+        await db.delete(user)
+        await db.commit()
+
+    return {"status": "success"}
+
+@app.get("/auth/check-verification-status")
+async def check_verification_status(email: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+
+    if not user:
+        return {"is_verified": False}
+
+    return {"is_verified": user.is_verified}
 
 @app.get("/users/{user_id}/my-rating")
 async def get_my_rating_for_user(
@@ -237,8 +491,17 @@ async def get_user_profile(
 async def login(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).filter(User.nickname == login_data.nickname))
     user = result.scalars().first()
+
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong nickname or password")
+
+    # 🛡️ Перевірка чи верифікована пошта
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please verify your email address before signing in."
+        )
+
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer", "id": user.id, "nickname": user.nickname}
 
@@ -366,16 +629,55 @@ async def get_my_profile(token: str = Header(...), db: AsyncSession = Depends(ge
 @app.get("/check-nickname/{nickname}")
 async def check_nickname(nickname: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).filter(User.nickname == nickname))
-    if result.scalars().first():
+    user = result.scalars().first()
+
+    if user:
+        # Якщо акаунт не верифікований і пройшло більше 24 годин — видаляємо його разом зі зв'язками
+        if not user.is_verified and user.created_at < datetime.utcnow() - timedelta(hours=24):
+            uid = user.id
+            # Видаляємо всі дочірні зв'язки по черзі, щоб уникнути помилок БД
+            await db.execute(delete(UserLanguages).where(UserLanguages.user_id == uid))
+            await db.execute(delete(UserPlatforms).where(UserPlatforms.user_id == uid))
+            await db.execute(delete(UserAvailability).where(UserAvailability.user_id == uid))
+            await db.execute(delete(UserGames).where(UserGames.user_id == uid))
+            await db.execute(delete(UserAccounts).where(UserAccounts.user_id == uid))
+            await db.execute(delete(UserStyles).where(UserStyles.user_id == uid))
+
+            # Сам юзер
+            await db.delete(user)
+            await db.commit()
+            return {"exists": False} # Нікнейм знову вільний!
+
         return {"exists": True}
+
     return {"exists": False}
+
 
 @app.get("/check-email/{email}")
 async def check_email(email: str, db: AsyncSession = Depends(get_db)):
-    # Шукаємо користувача з такою поштою
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
-    return {"exists": user is not None}
+
+    if user:
+        # Якщо акаунт не верифікований і пройшло більше 24 годин — видаляємо його разом зі зв'язками
+        if not user.is_verified and user.created_at < datetime.utcnow() - timedelta(hours=24):
+            uid = user.id
+            # Видаляємо всі дочірні зв'язки по черзі
+            await db.execute(delete(UserLanguages).where(UserLanguages.user_id == uid))
+            await db.execute(delete(UserPlatforms).where(UserPlatforms.user_id == uid))
+            await db.execute(delete(UserAvailability).where(UserAvailability.user_id == uid))
+            await db.execute(delete(UserGames).where(UserGames.user_id == uid))
+            await db.execute(delete(UserAccounts).where(UserAccounts.user_id == uid))
+            await db.execute(delete(UserStyles).where(UserStyles.user_id == uid))
+
+            # Сам юзер
+            await db.delete(user)
+            await db.commit()
+            return {"exists": False} # Пошта знову вільна!
+
+        return {"exists": True}
+
+    return {"exists": False}
 
 @app.post("/ensure-game")
 async def ensure_game(data: dict, db: AsyncSession = Depends(get_db)):
@@ -2652,6 +2954,183 @@ async def logout_user(
         })
 
     return {"status": "success", "message": "Logged out successfully"}
+
+
+@app.post("/auth/resend-verification")
+async def resend_verification(data: dict, db: AsyncSession = Depends(get_db)):
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+
+    # Якщо користувач існує і ще не верифікований — оновлюємо токен і час
+    if user and not user.is_verified:
+        verification_token = str(uuid.uuid4())
+        user.verification_token = verification_token
+        user.created_at = datetime.utcnow() # Оновлюємо час, щоб 24 години на перевірку пішли заново
+        await db.commit()
+
+        send_verification_email(user.email, verification_token)
+
+    return {"status": "success", "message": "Verification email resent if user exists."}
+
+
+
+##FORGOT Password. Password Reset block####
+def send_reset_password_email(to_email: str, token: str):
+    smtp_host = os.getenv("SMTP_HOST", "localhost")
+    smtp_port = int(os.getenv("SMTP_PORT", "1025"))
+
+    # Посилання на сторінку скидання пароля на нашому бекенді
+    reset_link = f"http://192.168.0.229:8000/auth/reset-password?token={token}"
+
+    msg = EmailMessage()
+    msg['Subject'] = "Reset your password - GAME BUDDY"
+    msg['From'] = "noreply@gamebuddy.com"
+    msg['To'] = to_email
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Reset Password</title>
+        <style>
+            body {{ background-color: #0F0F13; margin: 0; padding: 0; font-family: 'Poppins', Arial, sans-serif; color: #FFFFFF; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 40px 20px; text-align: center; }}
+            .content-box {{ text-align: center; color: #FFFFFF; font-size: 16px; line-height: 27px; }}
+            .verify-btn {{ display: inline-block; font-weight: 700; font-size: 20px; color: #00F5A0 !important; text-decoration: none; margin: 35px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>Password Reset Request</h2>
+            <div class="content-box">
+                <p>We received a request to reset your password. Click the button below to set a new password:</p>
+                <div>
+                    <a href="{reset_link}" class="verify-btn">Reset Password</a>
+                </div>
+                <p>This link is valid for 20 minutes. If you didn't request this, simply ignore this email.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    msg.set_content("Please reset your password by visiting the link.")
+    msg.add_alternative(html_content, subtype='html')
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.send_message(msg)
+        print(f"✅ [MAILPIT] Лист для скидання пароля надіслано на {to_email}")
+    except Exception as e:
+        print(f"❌ [MAILPIT] Помилка відправки листа: {e}")
+
+@app.post("/auth/forgot-password")
+async def forgot_password(data: dict, db: AsyncSession = Depends(get_db)):
+    email = data.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalars().first()
+
+    # Навіть якщо юзера немає, краще повернути успіх задля безпеки (щоб не зливати балу пошт)
+    if user:
+        token = str(uuid.uuid4())
+        user.reset_password_token = token
+        user.reset_password_expires = datetime.utcnow() + timedelta(minutes=20) # Дійсний 20 хвилин
+        await db.commit()
+
+        send_reset_password_email(user.email, token)
+
+    return {"status": "success", "message": "If the email exists, a reset link has been sent."}
+
+
+@app.get("/auth/reset-password", response_class=HTMLResponse)
+async def reset_password_page(token: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.reset_password_token == token))
+    user = result.scalars().first()
+
+    if not user or not user.reset_password_expires or user.reset_password_expires < datetime.utcnow():
+        return """
+        <html><body style="background-color: #0F0F13; color: #FF3B5C; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Invalid or expired reset link.</h2>
+            <p style="color: #A3A3B5;">Please request a new password reset from the app.</p>
+        </body></html>
+        """
+
+    # Відображаємо гарну HTML-форму для введення нового пароля
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Reset Password</title>
+        <style>
+            body {{ background-color: #0F0F13; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+            .form-box {{ background: #181826; padding: 30px; border-radius: 12px; width: 100%; max-width: 400px; border: 1px solid #2B2B3B; text-align: center; }}
+            input {{ width: 90%; padding: 12px; margin: 10px 0; background: #0F0F1A; border: 1px solid #2B2B3B; color: white; border-radius: 8px; }}
+            button {{ background: #00F5A0; color: black; border: none; padding: 12px 20px; width: 100%; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 15px; }}
+        </style>
+    </head>
+    <body>
+        <div class="form-box">
+            <h2>Set New Password</h2>
+            <form action="/auth/reset-password" method="POST">
+                <input type="hidden" name="token" value="{token}">
+                <input type="password" name="new_password" placeholder="New Password (min 6 chars)" required minlength="6">
+                <button type="submit">Update Password</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.post("/auth/reset-password", response_class=HTMLResponse)
+async def submit_reset_password(token: str = Form(...), new_password: str = Form(...), db: AsyncSession = Depends(get_db)):
+    # 🛡️ ВАЛІДАЦІЯ ПАРОЛЯ НА БЕКЕНДІ
+    if len(new_password) < 6 or len(new_password) > 30:
+        return """
+        <html><body style="background-color: #0F0F13; color: #FF3B5C; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Password must be between 6 and 30 characters.</h2>
+            <p><a href="javascript:history.back()" style="color: #00F5A0;">Go back and try again</a></p>
+        </body></html>
+        """
+
+    if ' ' in new_password:
+        return """
+        <html><body style="background-color: #0F0F13; color: #FF3B5C; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Password cannot contain spaces.</h2>
+            <p><a href="javascript:history.back()" style="color: #00F5A0;">Go back and try again</a></p>
+        </body></html>
+        """
+
+    result = await db.execute(select(User).where(User.reset_password_token == token))
+    user = result.scalars().first()
+
+    if not user or not user.reset_password_expires or user.reset_password_expires < datetime.utcnow():
+        return """
+        <html><body style="background-color: #0F0F13; color: #FF3B5C; text-align: center; padding-top: 50px; font-family: sans-serif;">
+            <h2>Link expired or invalid.</h2>
+        </body></html>
+        """
+
+    # Оновлюємо пароль і стираємо використаний токен
+    user.password = get_password_hash(new_password)
+    user.reset_password_token = None
+    user.reset_password_expires = None
+    await db.commit()
+
+    return """
+    <html><body style="background-color: #0F0F13; color: white; text-align: center; padding-top: 50px; font-family: sans-serif;">
+        <h2 style="color: #00F5A0;">Password successfully updated!</h2>
+        <p style="color: #A3A3B5;">You can now return to the GAME BUDDY app and sign in with your new password.</p>
+    </body></html>
+    """
 
 app = socketio.ASGIApp(sio, app)
 if __name__ == "__main__":

@@ -164,9 +164,29 @@ class _SignInScreenState extends State<SignInScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isValid ? const Color(0xFF00F5A0) : const Color(0xFF2B2B3B),
                 ),
-                onPressed: isValid ? () {
+                onPressed: isValid ? () async {
+                  final email = emailController.text.trim();
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reset link sent!')));
+
+                  try {
+                    final response = await http.post(
+                      Uri.parse('${ApiConfig.baseUrl}/auth/forgot-password'),
+                      headers: {"Content-Type": "application/json"},
+                      body: json.encode({"email": email}),
+                    );
+
+                    if (response.statusCode == 200) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Reset link sent! Check your email.'),
+                          backgroundColor: Color(0xFF00F5A0),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    print("Error sending reset email: $e");
+                  }
                 } : null,
                 child: Text(
                   'Send',

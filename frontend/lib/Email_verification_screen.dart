@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'Home_Feed_screen.dart';
-import 'main_navigation.dart';
+import 'api_config.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'sign_in_screen.dart';
+
 
 class EmailVerificationScreen extends StatefulWidget {
   final String email;
@@ -17,17 +20,20 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   int _secondsRemaining = 45;
   bool _canResend = false;
   Timer? _timer;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _startTimer();
+    _startEmailVerificationPolling();
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
+    _pollingTimer?.cancel();
   }
 
   void _startTimer() {
@@ -45,6 +51,44 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
         setState(() {
           _secondsRemaining--;
         });
+      }
+    });
+  }
+
+  void _startEmailVerificationPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      try {
+        final response = await http.get(
+          Uri.parse('${ApiConfig.baseUrl}/auth/check-verification-status?email=${widget.email}'),
+        );
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final bool isVerified = data['is_verified'] ?? false;
+
+          if (isVerified) {
+            _pollingTimer?.cancel(); // Зупиняємо перевірку
+
+            if (!mounted) return;
+
+            // Показуємо приємне повідомлення успіху
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Email verified successfully! Please sign in.', style: TextStyle(fontSize: 15)),
+                backgroundColor: Color(0xFF00F5A0),
+              ),
+            );
+
+            // Перекидаємо на екран Sign In, очищаючи історію навігації
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => const SignInScreen()),
+                  (route) => false,
+            );
+          }
+        }
+      } catch (e) {
+        print("Polling error: $e");
       }
     });
   }
@@ -90,15 +134,29 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     );
   }
 
-  void _resendEmail() {
+  Future<void> _resendEmail() async {
     if (!_canResend) return;
-    _startTimer();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Verification link resent successfully!', style: TextStyle(fontSize: 15)),
-        backgroundColor: Color(0xFF00F5A0),
-      ),
-    );
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/resend-verification'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({"email": widget.email}),
+      );
+
+      if (response.statusCode == 200) {
+        _startTimer();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Verification link resent successfully!', style: TextStyle(fontSize: 15)),
+            backgroundColor: Color(0xFF00F5A0),
+          ),
+        );
+      }
+    } catch (e) {
+      print("Error resending email: $e");
+    }
   }
 
   @override
@@ -293,33 +351,33 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
                           const SizedBox(height: 45), // Відступ до дебаг-кнопки
 
+                          // Кнопка "Try again" (якщо вказав не ту пошту)
                           GestureDetector(
-                            onTap: () {
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
-                              );
+                            onTap: () async {
+                              // 1. Можемо додатково повідомити бекенд видалити цей непідтверджений профіль,
+                              // щоб пошта одразу звільнилася
+                              try {
+                                await http.post(
+                                  Uri.parse('${ApiConfig.baseUrl}/auth/cancel-registration'),
+                                  headers: {"Content-Type": "application/json"},
+                                  body: json.encode({"email": widget.email}),
+                                );
+                              } catch (e) {
+                                print("Error clearing unverified user: $e");
+                              }
+
+                              // 2. Повертаємось на екран налаштування профілю
+                              if (!mounted) return;
+                              Navigator.pop(context);
                             },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: const Color(0xFF00F5A0).withOpacity(0.3), width: 1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Home Feed (Debug →)',
-                                    style: TextStyle(
-                                      fontFamily: 'Poppins',
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 15,
-                                      color: Color(0xFF00F5A0),
-                                    ),
-                                  ),
-                                ],
+                            child: const Text(
+                              'Try again',
+                              style: TextStyle(
+                                fontFamily: 'Poppins',
+                                fontWeight: FontWeight.w500,
+                                fontSize: 15,
+                                color: Color(0xFF6F6F80),
+                                decoration: TextDecoration.underline,
                               ),
                             ),
                           ),
@@ -341,10 +399,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 24),
-            onPressed: () => Navigator.pop(context),
-          ),
+          const SizedBox(width: 48), // Просто відступ замість кнопки назад, щоб заголовок був ідеально по центру
           Expanded(
             child: Text(
               title,

@@ -147,7 +147,6 @@ class WelcomeScreen extends StatelessWidget {
                                   color: const Color(0xFF00FFD1),
                                   fontSize: isCompact ? 16 : 19,
                                   fontWeight: FontWeight.w400,
-                                  decoration: TextDecoration.underline,
                                 ),
                               ),
                             ),
