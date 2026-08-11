@@ -3,7 +3,7 @@ from datetime import timedelta, datetime
 import socketio
 from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete, update, or_, func, desc, case, text
+from sqlalchemy import select, and_, delete, update, or_, func, desc, case, text, desc
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
@@ -790,36 +790,49 @@ async def find_matches(
         Friendship.status == 'blocked'
     ).scalar_subquery()
 
-    # 3. Бали матчу
-    match_score = (
-            (select(func.count(UserGames.game_id)).filter(UserGames.user_id == User.id, UserGames.game_id.in_(my_game_ids)).scalar_subquery() * 100) +
-            case((User.is_online == True, 60), else_=0) +
-            case((User.voice_chat == True, 30), else_=0) +
-            (select(func.count(UserLanguages.lang)).filter(UserLanguages.user_id == User.id, UserLanguages.lang.in_(my_langs)).scalar_subquery() * 20) +
-            (select(func.count(UserPlatforms.platform)).filter(UserPlatforms.user_id == User.id, UserPlatforms.platform.in_(my_platforms)).scalar_subquery() * 20) +
-            (select(func.count(UserAvailability.utc_hour)).filter(UserAvailability.user_id == User.id, UserAvailability.utc_hour.in_(my_times)).scalar_subquery() * 10)
-    ).label("match_score")
+    # 3. Бали матчу з обмеженнями
+    # Використовуємо func.least замість least
+    game_score = func.least(
+        select(func.count(UserGames.game_id))
+        .filter(UserGames.user_id == User.id, UserGames.game_id.in_(my_game_ids))
+        .scalar_subquery(),
+        3
+    ) * 100
 
-    # 4. 🔥 ГОЛОВНА ЗМІНА ФІЛЬТРІВ:
-    # Якщо користувач обрав конкретну гру у верхньому фільтрі — шукаємо ТІЛЬКИ по ній!
+    # Онлайн + PRO статус
+    online_pro_score = case((User.is_online == True, 60), else_=0) + case((User.is_pro == True, 40), else_=0)
+
+    # Час (UTC), Мови, Платформи
+    time_score = select(func.count(UserAvailability.utc_hour)).filter(UserAvailability.user_id == User.id, UserAvailability.utc_hour.in_(my_times)).scalar_subquery() * 30
+    lang_score = select(func.count(UserLanguages.lang)).filter(UserLanguages.user_id == User.id, UserLanguages.lang.in_(my_langs)).scalar_subquery() * 20
+    platform_score = select(func.count(UserPlatforms.platform)).filter(UserPlatforms.user_id == User.id, UserPlatforms.platform.in_(my_platforms)).scalar_subquery() * 20
+
+    # Войс чат — всього 1 бал
+    voice_score = case((User.voice_chat == True, 1), else_=0)
+
+    match_score = (game_score + online_pro_score + time_score + lang_score + platform_score + voice_score).label("match_score")
+
+    # 4. 🔥 ВИЗНАЧЕННЯ ЦІЛЬОВИХ ІГОР (щоб не було Unresolved reference)
     if selected_game_id:
         target_game_ids = [selected_game_id]
     else:
-        target_game_ids = my_game_ids # За замовчуванням — усі мої ігри
+        target_game_ids = my_game_ids
 
+    # 5. Фільтри + виключення тих, хто не був онлайн більше 15 днів
     filters = [
         User.id != current_user_id,
         User.is_active == True,
+        User.is_verified == True,
+        or_(User.last_seen == None, User.last_seen >= datetime.utcnow() - timedelta(days=15)),
         ~User.id.in_(excluded_subquery),
         ~User.id.in_(blocked_by_others_subquery),
-        # Тепер перевіряємо наявність гри(ігор) з урахуванням вибору фільтра
         User.id.in_(select(UserGames.user_id).filter(UserGames.game_id.in_(target_game_ids)))
     ]
 
     if excluded_ids:
         filters.append(~User.id.in_(excluded_ids))
 
-    # 5. Запит до бази
+    # 6. Запит до бази із зваженим рандомом (діапазон хаосу 150)
     stmt = (
         select(User)
         .options(
@@ -831,7 +844,10 @@ async def find_matches(
             selectinload(User.styles)
         )
         .filter(*filters)
-        .order_by(desc(match_score), func.random())
+        .order_by(
+            desc(match_score + func.random() * 150),
+            func.random()
+        )
         .limit(20)
     )
 
@@ -2814,13 +2830,22 @@ async def activate_pro(
             raise HTTPException(status_code=400, detail="Trial already used")
         user.pro_trial_used = True
         user.is_pro = True
-        user.pro_expiry_date = base_time + timedelta(days=7) # Тріал залишаємо 7 днів (або теж можна скоротити, якщо треба)
+        user.pro_expiry_date = base_time + timedelta(days=7)
+
+        # 🔥 КЛЮЧОВИЙ МОМЕНТ: Видаляємо картку доступного тріалу з бази, щоб вона зникла
+        await db.execute(
+            delete(Notification).filter(
+                Notification.recipient_id == current_user_id,
+                Notification.game == "trial_available",
+                Notification.is_archived == False
+            )
+        )
     else:
         user.is_pro = True
         # === ТЕСТОВИЙ РЕЖИМ: 6 годин замість 30 днів ===
         user.pro_expiry_date = base_time + timedelta(hours=6)
 
-    # Нотифікація про активацію (activated)
+    # Нова нотифікація про успішну активацію (activated)
     new_notif = Notification(
         id=str(uuid.uuid4()),
         recipient_id=current_user_id,
@@ -2834,6 +2859,7 @@ async def activate_pro(
     db.add(new_notif)
     await db.commit()
 
+    # Сповіщаємо клієнта через сокет про появу нової картки "PRO activated"
     await sio.emit('new_notification', {
         "id": new_notif.id,
         "user_nickname": user.nickname,

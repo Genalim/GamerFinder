@@ -804,12 +804,11 @@ mixin NotificationCardsMixin {
       if (response.statusCode == 200) {
         print("SUCCESS: PRO тріал активовано успішно!");
 
-        // 1. Видаляємо картку тріалу зі списку сповіщень
+        // 1. Видаляємо стару картку тріалу з бази та з екрану
         await ApiService.deleteNotification(notificationId);
         onRemove(notificationId);
 
-        // 2. ПРАВИЛЬНЕ ОНОВЛЕННЯ: затягуємо свіжий профіль з сервера,
-        // де бекенд вже встановив is_pro = true
+        // 2. Оновлюємо профіль користувача в сесії (щоб локально з'явився статус PRO)
         final userId = await UserSession.getUserId();
         if (userId != null) {
           final profileResponse = await http.get(
@@ -822,10 +821,12 @@ mixin NotificationCardsMixin {
 
           if (profileResponse.statusCode == 200) {
             final data = json.decode(profileResponse.body);
-            // Оновлюємо глобальну сесію свіжими даними з бази
             UserSession().currentUser = GamerProfile.fromJson(data);
           }
         }
+
+        // Порада: після цього стейт перегорнеться, а бекенд автоматично відправить
+        // сокет-подію 'new_notification' із карткою "PRO activated", яка з'явиться у вкладці PRO.
       } else {
         print("ПОМИЛКА активації: ${response.body}");
       }
