@@ -3,3 +3,32 @@ PlayStyles Time
 'Afternoon': '12-17 UTC',
 'Evening': '18-22 UTC',
 'Late night': '23-5 UTC'
+
+
+Commands.
+Start of Backend:
+1)Start the Docker with Postgres base.
+2)Use: docker compose up --build
+To stop Backend use:
+1)docker compose down
+
+Frontend Flutter:
+Start: flutter run
+Clean: flutter clean
+       flutter pub get
+
+
+Start Emulator: emulator -avd Pixel_API_34 -wipe-data
+
+
+Release:
+In the front folder:  flutter build apk --release
+
+Icon for the application:
+1)flutter pub run flutter_launcher_icons
+
+
+GIT:
+git add
+git commit -m "name"
+git push

@@ -17,6 +17,7 @@ import 'subscription_screen.dart';
 import 'services/settings_service.dart';
 import 'profile_setup_manager.dart';
 import 'services/chat_manager.dart';
+import 'app_info_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -402,6 +403,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute(builder: (context) => const SubscriptionScreen()),
               );},
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          const SectionHeader(title: 'About Application'),
+          Card(
+            color: cardColor,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: const Icon(Icons.info_outline, color: accentColor),
+              title: const Text('Application Data & Info', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Credits, IGDB, and image sources', style: TextStyle(color: Color(0xFF8E8EA9), fontSize: 12)),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white60),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AppInfoScreen()),
+                );
+              },
             ),
           ),
           const SizedBox(height: 20),
